@@ -11,18 +11,18 @@ export type AIModel = {
 // AI Models Configuration
 export const AI_MODELS: AIModel[] = [
   // DeepSeek (Cost-Effective)
-  { id: 'deepseek-chat', name: 'DeepSeek Chat', provider: 'deepseek', contextWindow: 64000, costPer1MTokens: 0.14 },
+  { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)', provider: 'deepseek', contextWindow: 64000, costPer1MTokens: 0.14 },
   { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)', provider: 'deepseek', contextWindow: 64000, costPer1MTokens: 0.55 },
 
-  // Google Gemini
+  // Google Gemini (Efficient & Multimodal)
   { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'gemini', contextWindow: 1000000, costPer1MTokens: 0.075 },
   { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'gemini', contextWindow: 2000000, costPer1MTokens: 1.25 },
-  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Experimental)', provider: 'gemini', contextWindow: 1000000, costPer1MTokens: 0.0 },
-
-  // OpenAI
-  { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'openai', contextWindow: 128000, costPer1MTokens: 2.50 },
+  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Exp)', provider: 'gemini', contextWindow: 1000000, costPer1MTokens: 0.0 },
+  
+  // OpenAI (Standard)
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', contextWindow: 128000, costPer1MTokens: 2.50 },
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', contextWindow: 128000, costPer1MTokens: 0.15 },
-  { id: 'o3-mini', name: 'O3 Mini', provider: 'openai', contextWindow: 200000, costPer1MTokens: 1.10 },
+  { id: 'o1-mini', name: 'o1 Mini (Reasoning)', provider: 'openai', contextWindow: 128000, costPer1MTokens: 3.00 },
 ];
 
 export type ActionType =
@@ -63,7 +63,8 @@ export type AIFeature =
   | 'summarize'
   | 'discussion'
   | 'formula'
-  | 'table';
+  | 'table'
+  | 'chat';
 
 export type ModelAssignment = {
   [key in AIFeature]: string; // Model ID
@@ -101,6 +102,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     'discussion': 'deepseek-reasoner',
     'formula': 'gemini-1.5-flash',
     'table': 'gemini-1.5-flash',
+    'chat': 'gemini-1.5-flash',
   },
   shortcuts: DEFAULT_SHORTCUTS,
   isKoreanPrimary: true,

@@ -11,16 +11,18 @@ interface AdvancedSettingsProps {
   settings: AppSettings;
   onSave: (settings: AppSettings) => void;
   onClose: () => void;
+  storageManager?: LocalStorageManager;
+  onSyncLibrary?: () => void;
 }
 
 type TabId = 'api' | 'models' | 'shortcuts' | 'reader' | 'storage';
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'api', label: 'API Keys', icon: <Key size={16} /> },
-  { id: 'models', label: 'Models', icon: <Zap size={16} /> },
-  { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard size={16} /> },
-  { id: 'reader', label: 'Reader', icon: <Save size={16} /> },
-  { id: 'storage', label: 'Storage', icon: <Database size={16} /> },
+  { id: 'api', label: 'API 키', icon: <Key size={16} /> },
+  { id: 'models', label: '모델 설정', icon: <Zap size={16} /> },
+  { id: 'shortcuts', label: '단축키', icon: <Keyboard size={16} /> },
+  { id: 'reader', label: '리더 설정', icon: <Save size={16} /> },
+  { id: 'storage', label: '저장소', icon: <Database size={16} /> },
 ];
 
 export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
@@ -28,6 +30,8 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
   settings,
   onSave,
   onClose,
+  storageManager: propStorageManager,
+  onSyncLibrary,
 }) => {
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [activeTab, setActiveTab] = useState<TabId>('api');
@@ -35,20 +39,23 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
   const [shortcutError, setShortcutError] = useState<string | null>(null);
   
   // Storage Manager State
-  const [storageManager] = useState(() => new LocalStorageManager());
+  const [internalStorageManager] = useState(() => new LocalStorageManager());
+  const storageManager = propStorageManager || internalStorageManager;
+
   const [storageInfo, setStorageInfo] = useState<string>('브라우저 저장소 (localStorage)');
   const [isMigrating, setIsMigrating] = useState(false);
 
   useEffect(() => {
     // 저장소 상태 복원
     const initStorage = async () => {
-      const restored = await storageManager.restoreDirectoryHandle();
-      if (restored) {
+      // Prop으로 전달된 경우 이미 핸들 복원이 시도되었을 수 있음.
+      // 여기서는 정보만 업데이트
+      if (storageManager.getStorageInfo) {
         setStorageInfo(storageManager.getStorageInfo());
       }
     };
     initStorage();
-  }, [storageManager]);
+  }, [storageManager, isOpen]);
 
   const duplicateShortcuts = useMemo(() => {
     const byKey = new Map<string, string[]>();
@@ -139,8 +146,8 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
             <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
               <div className="flex items-center justify-between px-6 py-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Settings</h2>
-                  <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5">AI provider keys, models, and shortcuts</p>
+                  <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">설정</h2>
+                  <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5">API 키, 모델, 단축키 설정</p>
                 </div>
                 <button
                   onClick={onClose}
@@ -173,13 +180,13 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
               {activeTab === 'api' && (
                 <div className="space-y-5">
                   <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    Your keys are stored only in local storage.
+                    API 키는 로컬 저장소에만 저장됩니다.
                   </p>
 
                   {([
-                    { provider: 'deepseek' as AIProvider, name: 'DeepSeek', tag: 'Cost-efficient', placeholder: 'sk-...', url: 'https://platform.deepseek.com', urlLabel: 'platform.deepseek.com' },
-                    { provider: 'gemini' as AIProvider, name: 'Google Gemini', tag: 'Great for formulas', placeholder: 'AIza...', url: 'https://aistudio.google.com/apikey', urlLabel: 'aistudio.google.com' },
-                    { provider: 'openai' as AIProvider, name: 'OpenAI', tag: 'GPT-4o & more', placeholder: 'sk-proj-...', url: 'https://platform.openai.com/api-keys', urlLabel: 'platform.openai.com' },
+                    { provider: 'deepseek' as AIProvider, name: 'DeepSeek', tag: '가성비 최적(Cost-efficient)', placeholder: 'sk-...', url: 'https://platform.deepseek.com', urlLabel: 'platform.deepseek.com' },
+                    { provider: 'gemini' as AIProvider, name: 'Google Gemini', tag: '수식 처리에 강함', placeholder: 'AIza...', url: 'https://aistudio.google.com/apikey', urlLabel: 'aistudio.google.com' },
+                    { provider: 'openai' as AIProvider, name: 'OpenAI', tag: 'GPT-4o 및 최신 모델', placeholder: 'sk-proj-...', url: 'https://platform.openai.com/api-keys', urlLabel: 'platform.openai.com' },
                   ] as const).map(({ provider, name, tag, placeholder, url, urlLabel }) => (
                     <div key={provider} className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3">
                       <div className="flex items-center justify-between">
@@ -211,17 +218,18 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
               {activeTab === 'models' && (
                 <div className="space-y-5">
                   <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    Choose which AI model handles each feature.
+                    각 기능별 AI 모델을 선택하세요.
                   </p>
 
-                  {(['explain', 'summarize', 'discussion', 'formula', 'table'] as AIFeature[]).map(feature => {
+                  {(['explain', 'summarize', 'discussion', 'formula', 'table', 'chat'] as AIFeature[]).map(feature => {
                     const currentModel = AI_MODELS.find(m => m.id === localSettings.modelAssignments[feature]);
                     const featureLabels: Record<AIFeature, string> = {
-                      explain: 'Explain Selection',
-                      summarize: 'Summarize Text',
-                      discussion: 'AI Discussion',
-                      formula: 'Formula / Equation',
-                      table: 'Table Interpretation',
+                      explain: '선택 텍스트 설명',
+                      summarize: '요약',
+                      discussion: 'AI 토론',
+                      formula: '수식/공식',
+                      table: '표 해석',
+                      chat: '연구 에이전트 (채팅)',
                     };
                     return (
                       <div key={feature} className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2.5">
@@ -233,16 +241,19 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                           onChange={(e) => updateModelAssignment(feature, e.target.value)}
                           className="w-full px-3.5 py-2.5 text-sm rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 focus:border-zinc-400 transition-all appearance-none cursor-pointer"
                         >
-                          {AI_MODELS.map(model => (
-                            <option key={model.id} value={model.id}>
-                              {model.name} ({model.provider})
-                              {model.costPer1MTokens !== undefined && ` — $${model.costPer1MTokens.toFixed(2)}/1M`}
-                            </option>
-                          ))}
+                          {AI_MODELS
+                            .map(model => {
+                            const priceKrw = model.costPer1MTokens ? Math.round(model.costPer1MTokens * 1450) : 0;
+                            return (
+                              <option key={model.id} value={model.id}>
+                                {model.name} — {model.costPer1MTokens === 0 ? '무료' : `₩${priceKrw.toLocaleString()}/1M`}
+                              </option>
+                            );
+                          })}
                         </select>
                         {currentModel && (
                           <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                            Context window: {currentModel.contextWindow.toLocaleString()} tokens
+                            컨텍스트 윈도우: {currentModel.contextWindow.toLocaleString()} tokens
                           </p>
                         )}
                       </div>
@@ -254,7 +265,7 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
               {activeTab === 'shortcuts' && (
                 <div className="space-y-3">
                   <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2">
-                    Click a shortcut badge to reassign it.
+                    단축키 배지를 클릭하여 재할당하세요.
                   </p>
 
                   {localSettings.shortcuts.map((shortcut, index) => (
@@ -291,7 +302,7 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
 
                   {duplicateShortcuts.length > 0 && (
                     <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
-                      Duplicate key assignments detected. Please assign different shortcuts.
+                      중복된 키 할당이 감지되었습니다. 다른 단축키를 할당해주세요.
                     </div>
                   )}
                   {shortcutError && (
@@ -308,9 +319,9 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          Korean-First Reading
+                          한글 우선 보기
                         </label>
-                        <p className="text-xs text-zinc-500">Show Korean translations as primary text</p>
+                        <p className="text-xs text-zinc-500">한글 번역을 주 텍스트로 표시합니다</p>
                       </div>
                       <button
                         onClick={() => setLocalSettings({ ...localSettings, isKoreanPrimary: !localSettings.isKoreanPrimary })}
@@ -331,9 +342,9 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          App Theme
+                          앱 테마 (App Theme)
                         </label>
-                        <p className="text-xs text-zinc-500">Switch between light and dark modes</p>
+                        <p className="text-xs text-zinc-500">라이트/다크 모드 전환</p>
                       </div>
                       <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
                         <button
@@ -361,7 +372,7 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
 
                     <div className="space-y-2.5">
                       <label className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        Default translation mode
+                        기본 번역 모드
                       </label>
                       <select
                         value={localSettings.defaultLanguage}
@@ -373,15 +384,15 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                         }
                         className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
                       >
-                        <option value="en">English Original Primary</option>
-                        <option value="ko">Korean Translation Primary</option>
+                        <option value="en">영어 원문 우선 (English Original Primary)</option>
+                        <option value="ko">한글 번역 우선 (Korean Translation Primary)</option>
                       </select>
                     </div>
                   </div>
 
                   <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2.5">
                     <label className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Highlight palette
+                      하이라이트 색상 (Highlight palette)
                     </label>
                     <div className="grid grid-cols-5 gap-2">
                       {localSettings.highlightColors.map((color, index) => (
@@ -400,7 +411,7 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
 
                   <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2.5">
                     <label className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Autosave interval ({localSettings.autoSaveInterval}s)
+                      자동 저장 간격 (Autosave interval {localSettings.autoSaveInterval}s)
                     </label>
                     <input
                       type="range"
@@ -451,7 +462,10 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                           const success = await storageManager.requestDirectory();
                           if (success) {
                             setStorageInfo(storageManager.getStorageInfo());
-                            alert('로컬 폴더가 설정되었습니다!\\n\\n이제부터 모든 데이터는 선택한 폴더에 저장됩니다.');
+                            if (onSyncLibrary) {
+                                onSyncLibrary();
+                            }
+                            alert('로컬 폴더가 설정되었습니다!\\n\\n이제부터 모든 데이터는 선택한 폴더에 저장됩니다.\\n폴더 내의 HTML 파일들이 라이브러리에 추가됩니다.');
                           }
                         }}
                         className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
@@ -526,21 +540,21 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                 className="flex items-center gap-1.5 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded-md hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-all"
               >
                 <RotateCcw size={14} />
-                Reset
+                초기화
               </button>
               <div className="flex gap-2.5">
                 <button
                   onClick={onClose}
                   className="px-5 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 rounded-md transition-all"
                 >
-                  Cancel
+                  취소(Cancel)
                 </button>
                 <button
                   onClick={handleSave}
                   className="flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 rounded-md shadow-sm transition-all active:scale-[0.98]"
                 >
                   <Save size={14} />
-                  Save Settings
+                  설정 저장
                 </button>
               </div>
             </div>

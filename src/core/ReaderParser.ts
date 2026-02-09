@@ -83,6 +83,16 @@ export class ReaderParser {
     private static alignSentences(enHtml: string, koHtml: string): AlignedSentence[] {
         const enSentences = this.splitIntoSentences(this.cleanHtml(enHtml));
         const koSentences = this.splitIntoSentences(this.cleanHtml(koHtml));
+        
+        // Strategy: 1:1 Mapping or Fallback
+        // If the number of sentences differs significantly (or even slightly), the naive index mapping makes the text essentially unreadable in "Korean Only" mode because specific sentences will drop to English or disappear.
+        // User Preference: "Certain 1:1 mapping" -> If we can't guarantee sentence-level 1:1, we should enforce PARAGRAPH-level 1:1.
+        // This means treating the entire paragraph content as a single "sentence" block.
+        
+        if (enSentences.length !== koSentences.length) {
+             return [{ en: this.cleanHtml(enHtml), ko: this.cleanHtml(koHtml) }];
+        }
+
         const aligned: AlignedSentence[] = [];
         const maxLen = Math.max(enSentences.length, koSentences.length);
         for (let i = 0; i < maxLen; i++) {
@@ -91,9 +101,24 @@ export class ReaderParser {
         return aligned;
     }
 
-    static parse(html: string): { paragraphs: ParagraphData[], structure: PaperStructure } {
+    static parse(html: string, baseUrl: string = ''): { paragraphs: ParagraphData[], structure: PaperStructure } {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
+        
+        // Resolve relative paths for images
+        if (baseUrl) {
+            const images = doc.querySelectorAll('img');
+            images.forEach(img => {
+                const src = img.getAttribute('src');
+                if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
+                    // Normalize base url to end with slash (remove filename)
+                    const lastSlash = baseUrl.lastIndexOf('/');
+                    const dir = lastSlash > -1 ? baseUrl.substring(0, lastSlash + 1) : baseUrl + (baseUrl ? '/' : '');
+                    img.setAttribute('src', dir + src);
+                }
+            });
+        }
+
         const results: ParagraphData[] = [];
         const seenHashes = new Set<string>();
         const processedContainers = new Set<Element>();
@@ -186,7 +211,12 @@ export class ReaderParser {
             translatedElements.forEach((el) => {
                 const container = el.parentElement;
                 if (!container || processedContainers.has(container)) return;
+                
+                // Ancestry check: ensure we don't process if an ancestor is already processed
+                // However, for Immersive Translate wrappers, they are usually leaf-ish nodes.
+                // But let's be safe.
                 processedContainers.add(container);
+
                 const koElements = container.querySelectorAll('.immersive-translate-target-wrapper');
                 const koText = Array.from(koElements).map(k => k.innerHTML).join(' ');
                 
@@ -199,7 +229,17 @@ export class ReaderParser {
             });
         } else {
             const elements = Array.from(doc.querySelectorAll(fallbackSelector));
-            elements.forEach((el) => {
+             // Filter: Exclude elements that are descendants of other elements in the list
+            const topLevelElements = elements.filter(el => {
+                let parent = el.parentElement;
+                while (parent) {
+                    if (elements.includes(parent)) return false;
+                    parent = parent.parentElement;
+                }
+                return true;
+            });
+
+            topLevelElements.forEach((el) => {
                 if (processedContainers.has(el)) return;
                 processedContainers.add(el);
                 const isMedia = ['img', 'figure', 'picture', 'table'].includes(el.tagName.toLowerCase());

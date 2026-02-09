@@ -109,8 +109,8 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
                   <MessageCircle size={15} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-sm text-zinc-900 dark:text-zinc-50">AI Discussion</h3>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Ask questions about selected text</p>
+                  <h3 className="font-semibold text-sm text-zinc-900 dark:text-zinc-50">AI 토론</h3>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">선택한 텍스트에 대해 질문하세요</p>
                 </div>
               </div>
               <button
@@ -123,7 +123,7 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
 
             {/* Context Banner */}
             <div className="px-5 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-              <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-500 uppercase tracking-wider mb-1">Context</p>
+              <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-500 uppercase tracking-wider mb-1">문맥</p>
               <p className="text-sm text-zinc-700 dark:text-zinc-300 italic line-clamp-2 leading-relaxed">"{selectedText}"</p>
               {paragraphContext && paragraphContext !== selectedText && (
                 <p className="text-xs mt-1 text-zinc-500 dark:text-zinc-400 line-clamp-2">{paragraphContext}</p>
@@ -137,8 +137,8 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
                   <div className="w-12 h-12 rounded-md bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mb-3">
                     <Bot size={22} className="text-zinc-400" />
                   </div>
-                  <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Start a conversation</p>
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">Ask anything about the selected text</p>
+                  <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">대화를 시작하세요</p>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">선택한 텍스트에 대해 무엇이든 물어보세요</p>
                 </div>
               )}
 
@@ -202,12 +202,12 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
             <div className="px-5 py-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
               <div className="mb-3 flex flex-wrap gap-2">
                 {[
-                  'Explain this in simpler terms.',
-                  'What is the key assumption here?',
-                  'How does this compare to prior work?',
-                ].map((prompt) => (
+                  '이것을 더 쉬운 용어로 설명해줘.',
+                  '여기서 핵심 가정은 무엇인가?',
+                  '이것은 이전 연구와 어떻게 비교되는가?',
+                ].map((prompt, i) => (
                   <button
-                    key={prompt}
+                    key={i}
                     onClick={() => applyPrompt(prompt)}
                     className="px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 text-[11px] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                   >
@@ -225,7 +225,7 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
                       void handleSend();
                     }
                   }}
-                  placeholder="Ask a question…"
+                  placeholder="질문을 입력하세요..."
                   disabled={loading}
                   rows={3}
                   className="flex-1 px-4 py-2.5 text-sm rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-400/40 focus:border-zinc-400 disabled:opacity-50 transition-all resize-none"
@@ -238,7 +238,7 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
                   {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                 </button>
               </div>
-              <p className="text-[11px] text-zinc-400 mb-2">Press Ctrl/Cmd + Enter to send.</p>
+              <p className="text-[11px] text-zinc-400 mb-2">Ctrl/Cmd + Enter를 눌러 전송하세요.</p>
 
               {messages.length > 0 && (
                 <button
@@ -249,12 +249,12 @@ export const AIDiscussionModal: React.FC<AIDiscussionModalProps> = ({
                   {ending ? (
                     <>
                       <Loader2 size={15} className="animate-spin" />
-                      Saving…
+                      저장 중...
                     </>
                   ) : (
                     <>
                       <Check size={15} />
-                      End Discussion & Save
+                      토론 종료 및 저장
                     </>
                   )}
                 </button>

@@ -9,7 +9,8 @@ HTML 논문을 PDF 뷰어처럼 읽고, AI 기능으로 이해/요약/토론을 
 - **정교한 HTML 파싱**: 번역 도구(Immersive Translate 등) 출력물을 완벽 파싱
   - `sup`, `sub`, 수식(KaTeX/LaTeX), 표, 인용구 등 구조 보존
   - 50%, 88% 같은 숫자 분리 방지 (Phase 26)
-  - 헤더 인식 및 계층 구조 자동 생성
+  - 헤더 인식 및 계층 구조(TOC) 자동 생성
+  - 그림(Figure) 및 캡션 자동 추출 및 내비게이션
 - **세션 복원**: 마지막 읽던 문서 + 스크롤 위치 자동 복원
 - **읽기 진행률**: 실시간 진행률 추적 및 라이브러리 반영
 - **가상 파일 시스템**: 업로드한 HTML을 localStorage에 압축 저장
@@ -21,13 +22,14 @@ HTML 논문을 PDF 뷰어처럼 읽고, AI 기능으로 이해/요약/토론을 
 - **자동 저장**: 설정 가능한 주기(기본 30초)마다 localStorage 저장
 - **주석 내비게이션**: Alt+↓/↑ 단축키로 하이라이트 간 이동
 
-### 🤖 AI 기능
+### 🤖 AI 기능 (Advanced)
+- **Multi-LLM Support**: Google Gemini (Pro/Flash), DeepSeek, OpenAI 등 다중 모델 지원
+- **Smart Routing**: 작업의 복잡도와 문맥에 따라 최적의 AI 모델을 자동 라우팅 (비용 절감 및 효율성 증대)
+- **Context-Aware Suggestions**: 논문 전체 내용을 분석하여 해당 논문의 핵심을 찌르는 맞춤형 질문 세트 자동 생성
+- **Persistence (지속성)**: 생성된 AI 요약, 추천 질문, 채팅 내역을 각 논문별로 자동 저장하여 재방문 시 즉시 로드
+- **One-Click Regenerate**: 저장된 AI 분석 결과가 만족스럽지 않을 경우 원클릭으로 재생성
 - **AI 설명**: 선택한 구절을 전문적으로 해설 (한국어)
-- **AI 요약**: 핵심 내용을 1-2문장으로 압축
-- **AI Auto-Highlight**: 논문 전체에서 핵심 문장 5-7개 자동 감지
-  - Novelty (보라색): 독창적 기여
-  - Method (파란색): 핵심 기법
-  - Result (초록색): 주요 발견
+- **AI 요약**: 논문의 핵심 기여와 방법론을 1-2문장으로 압축
 - **Research Agent**: Multi-agent 오케스트레이션
   - 분석/검색/저자 시뮬레이션/비평/가설 생성
   - 사고 과정 시각화 + 마크다운 결과
@@ -103,8 +105,21 @@ npm run build:stable
    - Discussion: Research Agent 모델
 4. 저장 후 텍스트 선택 → AI 기능 사용 가능
 
-## 데이터 저장
-- 모든 데이터는 브라우저의 localStorage에 저장 (Reader, FloatingToolbar, Paragraph 등)
+## 데이터 저장 (Dual Strategy)
+- **로컬 폴더 모드 (권장)**
+  - 사용자가 선택한 폴더에 파일 직접 저장
+  - 구조:
+    - `/SelectedFolder/`
+      - `*.html` (논문 파일)
+      - `paper-reader-data/`
+        - `settings.json` (설정)
+        - `annotations/` (문서별 주석)
+  - 장점: 브라우저 청소에도 데이터 유지, 파일 백업 용이
+
+- **브라우저 모드 (기본)**
+  - `localStorage` 및 `IndexedDB` 사용
+  - 설치 없이 즉시 사용 가능하나, 데이터 영구 보존에 취약
+
     core/              # 파서, 저장, AI 클라이언트 등 핵심 로직
     hooks/             # 단축키 등 커스텀 훅
     types/             # TypeScript 타입 정의
@@ -121,18 +136,19 @@ npm run build:stable
 ✅ **AI 기능**
 - 선택 텍스트 AI 설명/요약 (인라인 저장)
 - Auto-Highlight: 핵심 문장 자동 감지
-- Research Agent: Multi-agent 분석/토론
-- Context-aware 프롬프팅
+- Research Agent: Multi-agent 분석/토론 (Chat 모드 추가)
+- Smart Routing: 모델 최적화 (GPT-4o / DeepSeek / Gemini)
 
 ✅ **주석 시스템**
 - Highlight (색상 배경)
 - AI Insight (보라색 밑줄 + 툴팁)
 - Definition/Note (파란색 배지)
 - Discussion (초록색 배지)
-- 모든 주석 localStorage 자동 저장
+- 모든 주석 로컬 파일(JSON) 자동 저장
 
 ✅ **라이브러리 관리**
-- 가상 파일 시스템 (업로드 → localStorage)
+- 로컬 폴더 연동 (FileSystem Access API)
+- 파일 업로드 필요 없음 (폴더 내 파일 자동 감지)
 - 읽기 진행률 추적
 - 마지막 읽은 위치 복원
 - 검색 및 정렬
@@ -143,16 +159,9 @@ npm run build:stable
 - BibTeX 메타데이터
 
 ## 주의사항
-- 현재 지원 입력 포맷은 HTML(.html/.htm)입니다
-- **이미지 처리**: HTML 내 이미지는 자동으로 추출되어 저장됩니다
-  - 외부 URL 이미지: 자동 다운로드 후 저장
-  - Base64 인라인 이미지: 파일로 변환하여 메모리 최적화
-  - 로컬 폴더 사용 시 images/ 하위 폴더에 저장
-- 대용량 문서의 경우 초기 로딩에 시간이 소요될 수 있습니다
-- **저장소 권장사항**:
-  - 브라우저 캐시 삭제로 인한 데이터 손실을 방지하려면 Settings → Storage에서 로컬 폴더를 선택하세요
-  - 기존 데이터는 "로컬 폴더로 데이터 복사" 버튼으로 마이그레이션 가능
-- 특정 Windows + Node 24 환경에서는 `vite build`가 비정상 종료될 수 있어, 배포 빌드는 Node LTS(권장: 22.x)에서 수행하는 것을 권장합니다
+- **지원 브라우저**: 로컬 폴더 기능은 Chrome, Edge 등 Chromium 기반 브라우저(PC)에서 최적으로 작동합니다.
+- **이미지 처리**: HTML 내 이미지는 자동으로 추출되어 로컬 폴더의 `images/` 하위 폴더에 저장됩니다. (로컬 폴더 모드 사용 시)
+- **API 키 관리**: 사용자의 API 키는 오직 사용자의 로컬 환경(settings.json)에만 저장되며 외부로 전송되지 않습니다.
 
 ## 라이선스
 - 개인/연구용으로 사용 가능. 상업적 사용은 별도 문의.

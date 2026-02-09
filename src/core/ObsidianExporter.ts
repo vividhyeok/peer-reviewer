@@ -19,7 +19,9 @@ export class ObsidianExporter {
     // 1. Try Tauri Export (Desktop App Mode)
     try {
       if (window.__TAURI__) {
+        // @ts-ignore
         const { save } = await import('@tauri-apps/plugin-dialog');
+        // @ts-ignore
         const { writeTextFile } = await import('@tauri-apps/plugin-fs');
 
         const savePath = await save({

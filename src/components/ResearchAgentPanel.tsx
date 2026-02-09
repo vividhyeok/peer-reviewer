@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, Bot, User, Loader2, ChevronDown, ChevronUp, Search, Database, UserCheck, Microscope, Layers, ShieldAlert, Lightbulb, MessageSquareText, BookOpen, Copy, Check } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Loader2, ChevronDown, ChevronUp, Search, Database, UserCheck, Microscope, Layers, ShieldAlert, Lightbulb, MessageSquareText, BookOpen, Copy, Check, RotateCw } from 'lucide-react';
 import { MultiAIClient } from '../core/MultiAIClient';
 import { type AppSettings, AI_MODELS } from '../types/settings';
 import { type AgentThought, type AIMessage, type PaperSummary, type Annotation } from '../types/ReaderTypes';
@@ -9,15 +9,30 @@ import ReactMarkdown from 'react-markdown';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { LocalStorageManager } from '../core/LocalStorageManager';
+
 interface ResearchAgentPanelProps {
     settings: AppSettings;
     documentFullText?: string;
     onOpenSettings: () => void;
     annotations: Annotation[];
     initialQuery?: string;
+    storageManager: LocalStorageManager;
+    fileId?: string;
 }
 
-export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings, documentFullText, onOpenSettings, annotations, initialQuery }) => {
+// Utility for hashing
+function simpleHash(str: string) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
+}
+
+export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings, documentFullText, onOpenSettings, annotations, initialQuery, storageManager, fileId }) => {
     const [messages, setMessages] = useState<AIMessage[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -28,9 +43,72 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
     const [summary, setSummary] = useState<PaperSummary | null>(null);
     const [generatingSummary, setGeneratingSummary] = useState(false);
     const [copiedCode, setCopiedCode] = useState<string | null>(null);
+    const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+    const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const aiClientRef = useRef<MultiAIClient>(new MultiAIClient(settings.apiKeys));
+    const docKeyRef = useRef<string>('');
+
+    // --- Persistence Logic ---
+    useEffect(() => {
+        // Prepare key: prefer fileId, fallback to hash of text
+        let key = '';
+        if (fileId) {
+            key = fileId;
+        } else if (documentFullText) {
+            key = simpleHash(documentFullText.slice(0, 5000));
+        } else {
+            return; // No identity
+        }
+        
+        docKeyRef.current = key;
+        
+        const loadCache = async () => {
+            const cachedSummary = await storageManager.load(`summary_${key}`);
+            if (cachedSummary) {
+                try { setSummary(JSON.parse(cachedSummary)); } catch(e) {}
+            } else {
+                setSummary(null);
+            }
+
+            const cachedQuestions = await storageManager.load(`questions_${key}`);
+            if (cachedQuestions) {
+                try { setSuggestedQuestions(JSON.parse(cachedQuestions)); } catch(e) {}
+            } else {
+                setSuggestedQuestions([]);
+                // Only trigger generation if we have text
+                if (documentFullText) loadSuggestions(key); 
+            }
+        };
+
+        loadCache();
+    }, [fileId, documentFullText, storageManager]);
+
+    const loadSuggestions = async (key: string, force = false) => {
+         // If key is not provided (legacy call), use current
+         if (!key) key = docKeyRef.current;
+         
+         if (!documentFullText) return;
+         setLoadingSuggestions(true);
+         try {
+             const modelId = settings.modelAssignments.chat || 'gemini-1.5-flash';
+             const modelInfo = AI_MODELS.find(m => m.id === modelId);
+             if (modelInfo && settings.apiKeys[modelInfo.provider]) {
+                 const questions = await aiClientRef.current.suggestQuestions(
+                     { provider: modelInfo.provider as any, modelId: modelInfo.id },
+                     documentFullText
+                 );
+                 setSuggestedQuestions(questions);
+                 storageManager.save(`questions_${key}`, JSON.stringify(questions));
+             }
+         } catch (e) {
+             console.error(e);
+         } finally {
+             setLoadingSuggestions(false);
+         }
+    };
+
 
     const handleCopyCode = (code: string) => {
         navigator.clipboard.writeText(code);
@@ -69,19 +147,11 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         };
         window.addEventListener('research-agent-context-change', handleContextChange);
 
-        const handleDocLoaded = () => {
-            setSummary(null);
-            setMessages([]);
-            setThoughts([]);
-        };
-        window.addEventListener('document-loaded', handleDocLoaded);
-
         return () => {
             window.removeEventListener('research-agent-query', handleExternalQuery);
             // @ts-ignore
             window.removeEventListener('research-agent-open', handleExternalQuery);
             window.removeEventListener('research-agent-context-change', handleContextChange);
-            window.removeEventListener('document-loaded', handleDocLoaded);
         };
     }, []);
 
@@ -100,8 +170,10 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         }
     }, [triggerSend]);
 
-    const fetchSummary = async () => {
-        if (!documentFullText || generatingSummary || summary) return;
+    const fetchSummary = async (force = false) => {
+        if (!documentFullText || generatingSummary) return;
+        if (!force && summary) return;
+
         setGeneratingSummary(true);
         try {
             const modelId = settings.modelAssignments.summarize || 'deepseek-chat';
@@ -115,6 +187,10 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                 documentFullText
             );
             setSummary(res);
+            if (docKeyRef.current) {
+                storageManager.save(`summary_${docKeyRef.current}`, JSON.stringify(res));
+            }
+            toast.success("Summary generated");
         } catch (e) {
             console.error(e);
             toast.error("Summary generation failed");
@@ -133,16 +209,25 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, thoughts]);
 
+    const handleNewChat = () => {
+        setMessages([]);
+        setThoughts([]);
+        setSummary(null);
+        toast.info("새로운 대화가 시작되었습니다.");
+    };
+
     const handleSend = async () => {
         if (!input.trim() || !documentFullText || loading) return;
 
         const userQuery = input.trim();
         const userMsg: AIMessage = { role: 'user', content: userQuery };
+        
+        // Optimistic update
         setMessages(prev => [...prev, userMsg]);
         setInput('');
         setLoading(true);
         setThoughts([]);
-        setShowThoughts(false);
+        setShowThoughts(true);
 
         const modelId = settings.modelAssignments.discussion || 'deepseek-chat';
         const modelInfo = AI_MODELS.find(m => m.id === modelId);
@@ -167,7 +252,8 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                         }
                         return [...prev, thought];
                     });
-                }
+                },
+                messages // Pass current history (excluding the new userMsg which is passed as query)
             );
 
             setMessages(prev => [...prev, { role: 'assistant', content: finalAnswer }]);
@@ -194,19 +280,19 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
     };
 
     return (
-        <div className="h-full flex flex-col bg-transparent text-[var(--fg-primary)] overflow-hidden">
-            <div className="p-1 px-4 flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg-panel)]/50 backdrop-blur-md">
+        <div className="h-full flex flex-col bg-transparent text-zinc-900 dark:text-zinc-100 overflow-hidden">
+            <div className="p-1 px-4 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md">
                 <div className="flex gap-4">
                     {[
-                        { id: 'chat', label: 'Chat', icon: MessageSquareText },
-                        { id: 'summary', label: 'Summary', icon: BookOpen },
+                        { id: 'chat', label: '채팅', icon: MessageSquareText },
+                        { id: 'summary', label: '요약', icon: BookOpen },
                     ].map(tab => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id as any)}
                             className={clsx(
                                 "py-2 px-1 text-[11px] font-bold uppercase tracking-widest transition-all relative",
-                                activeTab === tab.id ? "text-[var(--accent)]" : "text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]"
+                                activeTab === tab.id ? "text-blue-600 dark:text-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-300"
                             )}
                         >
                             <div className="flex items-center gap-1.5">
@@ -220,6 +306,15 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                     ))}
                 </div>
                 <div className="flex items-center gap-2">
+                    {activeTab === 'chat' && messages.length > 0 && (
+                        <button
+                            onClick={handleNewChat}
+                            className="p-1.5 text-[var(--fg-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 rounded-md transition-colors"
+                            title="새 대화 시작"
+                        >
+                            <RotateCw size={14} />
+                        </button>
+                    )}
                     {loading && <Loader2 size={14} className="animate-spin text-[var(--accent)]" />}
                 </div>
             </div>
@@ -228,7 +323,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                 {!documentFullText ? (
                     <div className="flex flex-col items-center justify-center h-full text-[var(--fg-tertiary)] opacity-40 px-10 text-center">
                         <Sparkles size={48} className="mb-4" strokeWidth={1} />
-                        <p className="text-sm font-medium">Select a document to activate the agent</p>
+                        <p className="text-sm font-medium">AI 에이전트를 활성화하려면 문서를 선택하세요</p>
                     </div>
                 ) : activeTab === 'chat' ? (
                     messages.length === 0 && !loading ? (
@@ -243,7 +338,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                         <Layers size={14} className="text-blue-400" />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-[10px] text-blue-400 font-bold uppercase tracking-tighter">Current Section Context</p>
+                                        <p className="text-[10px] text-blue-400 font-bold uppercase tracking-tighter">현재 섹션 문맥</p>
                                         <p className="text-[12px] text-[var(--fg-secondary)] truncate italic">
                                             "{activeContext.text}"
                                         </p>
@@ -252,21 +347,37 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                         onClick={() => handleSend()}
                                         className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded-md transition-colors"
                                     >
-                                        REFINE
+                                        재설정
                                     </button>
                                 </motion.div>
                             )}
                             <div className="space-y-2">
-                                <h3 className="text-lg font-bold text-[color:var(--ink)]">How can I assist your research?</h3>
-                                <p className="text-sm text-[color:var(--muted)]">I use a multi-agent orchestration system to search, extract, and analyze papers.</p>
+                                <h3 className="text-lg font-bold text-[color:var(--ink)]">연구를 어떻게 도와드릴까요?</h3>
+                                <p className="text-sm text-[color:var(--muted)]">멀티 에이전트 시스템을 사용하여 논문을 검색, 추출, 분석합니다.</p>
                             </div>
                             <div className="grid grid-cols-1 gap-3">
-                                {[
-                                    "Explain the novelty of this work relative to current 2024 standards.",
-                                    "Extract all performance metrics into a code block table.",
-                                    "As the author, justify why you chose this specific methodology.",
-                                    "Find potential real-world applications for this algorithm."
-                                ].map(q => (
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[10px] text-[var(--fg-tertiary)] font-bold">추천 질문</span>
+                                    <button 
+                                        onClick={() => loadSuggestions(docKeyRef.current, true)} 
+                                        disabled={loadingSuggestions}
+                                        className="text-[10px] flex items-center gap-1 text-[var(--fg-tertiary)] hover:text-[var(--accent)] px-2 py-1 rounded hover:bg-[var(--accent)]/10 disabled:opacity-50"
+                                    >
+                                        <RotateCw size={10} /> 재생성
+                                    </button>
+                                </div>
+                                {loadingSuggestions ? (
+                                     <div className="space-y-3 opacity-50 animate-pulse">
+                                         {[1,2,3,4].map(i => (
+                                             <div key={i} className="h-10 bg-zinc-200 dark:bg-zinc-800 rounded-xl" />
+                                         ))}
+                                     </div>
+                                ) : (suggestedQuestions.length > 0 ? suggestedQuestions : [
+                                    "현재 2024년 표준과 비교하여 이 연구의 차별점을 설명해줘.",
+                                    "모든 성능 지표를 코드 블록 표로 추출해줘.",
+                                    "저자의 입장에서, 왜 이 특정 방법론을 선택했는지 정당화해줘.",
+                                    "이 알고리즘의 잠재적인 실제 응용 사례를 찾아줘."
+                                ]).map(q => (
                                     <button
                                         key={q}
                                         onClick={() => { setInput(q); }}
@@ -297,10 +408,10 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                         <div className={clsx(
                                             "max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed",
                                             m.role === 'user'
-                                                ? "bg-zinc-100 dark:bg-white/5 text-[var(--fg-primary)]"
-                                                : "bg-white dark:bg-zinc-900 border border-[var(--border)] text-[var(--fg-primary)] shadow-xl shadow-black/5 backdrop-blur-sm"
+                                                ? "bg-zinc-800 text-white rounded-br-md dark:bg-zinc-700" 
+                                                : "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 shadow-xl shadow-black/5 backdrop-blur-sm"
                                         )}>
-                                            <div className="prose dark:prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/10 prose-headings:text-zinc-100 prose-strong:text-zinc-100">
+                                            <div className="prose dark:prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/10 prose-headings:text-zinc-900 dark:prose-headings:text-zinc-100 prose-p:text-zinc-900 dark:prose-p:text-zinc-100">
                                                 <ReactMarkdown
                                                     components={{
                                                         code: ({ className, children, ...props }: any) => {
@@ -347,7 +458,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                         className="flex items-center gap-2 text-[11px] font-semibold text-[var(--accent)] hover:brightness-125 transition-all px-3 py-2 rounded-lg hover:bg-[var(--accent)]/10"
                                     >
                                         {showThoughts ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                        {showThoughts ? 'AI 생각 과정 숨기기' : 'Thinking...'}
+                                        {showThoughts ? 'AI 생각 과정 숨기기' : '생각 중...'}
                                     </button>
 
                                     <AnimatePresence>
@@ -394,16 +505,24 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                             {generatingSummary ? (
                                 <div className="flex flex-col items-center justify-center py-20 space-y-4">
                                     <Loader2 size={32} className="animate-spin text-[var(--accent)]" />
-                                    <p className="text-sm text-[var(--fg-tertiary)] animate-pulse">Generating academic synthesis...</p>
+                                    <p className="text-sm text-[var(--fg-tertiary)] animate-pulse">학술적 종합 분석 생성 중...</p>
                                 </div>
                             ) : summary ? (
                                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-20">
+                                    <div className="flex justify-end">
+                                         <button 
+                                            onClick={() => fetchSummary(true)} 
+                                            className="text-[10px] flex items-center gap-1 text-[var(--fg-tertiary)] hover:text-[var(--accent)] px-2 py-1 rounded hover:bg-[var(--accent)]/10"
+                                         >
+                                             <RotateCw size={10} /> 재생성
+                                         </button>
+                                    </div>
                                     <section className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl relative overflow-hidden group">
                                         <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
                                             <Sparkles size={48} className="text-blue-500" />
                                         </div>
                                         <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                            <Sparkles size={12} /> 3-Line Synthesis
+                                            <Sparkles size={12} /> 3줄 요약
                                         </h4>
                                         <p className="text-sm leading-relaxed text-[var(--fg-primary)] font-medium whitespace-pre-wrap">
                                             {summary.takeaway}
@@ -412,10 +531,10 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
 
                                     <div className="space-y-4 px-1">
                                         {[
-                                            { label: 'OBJECTIVE', content: summary.objective, icon: Search },
-                                            { label: 'METHODOLOGY', content: summary.methodology, icon: Microscope },
-                                            { label: 'KEY RESULTS', content: summary.results, icon: Layers },
-                                            { label: 'LIMITATIONS', content: summary.limitations, icon: ShieldAlert }
+                                            { label: '연구 목표', content: summary.objective, icon: Search },
+                                            { label: '연구 방법론', content: summary.methodology, icon: Microscope },
+                                            { label: '주요 결과', content: summary.results, icon: Layers },
+                                            { label: '한계점', content: summary.limitations, icon: ShieldAlert }
                                         ].map(item => item.content && (
                                             <div key={item.label} className="space-y-1.5">
                                                 <h5 className="text-[9px] font-black text-[var(--fg-tertiary)] uppercase tracking-tighter flex items-center gap-2">
@@ -430,9 +549,9 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                 </motion.div>
                             ) : (
                                 <div className="flex flex-col items-center justify-center py-20 text-center">
-                                    <p className="text-sm text-[var(--fg-tertiary)] mb-4">No summary generated yet.</p>
-                                    <button onClick={fetchSummary} className="px-6 py-2 bg-[var(--accent)] text-white text-xs font-bold rounded-full shadow-lg">
-                                        GENERATE SUMMARY
+                                    <p className="text-sm text-[var(--fg-tertiary)] mb-4">생성된 요약이 없습니다.</p>
+                                    <button onClick={() => fetchSummary()} className="px-6 py-2 bg-[var(--accent)] text-white text-xs font-bold rounded-full shadow-lg">
+                                        요약 생성
                                     </button>
                                 </div>
                             )}
@@ -441,13 +560,13 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                     <div className="space-y-6 pb-20">
                         <section className="px-1">
                             <h4 className="text-[10px] font-bold text-[var(--fg-tertiary)] uppercase tracking-widest mb-4 flex items-center gap-2">
-                                <Database size={12} /> Document Insights & Marks
+                                <Database size={12} /> 문서 인사이트 & 하이라이트
                             </h4>
 
                             {annotations.length === 0 ? (
                                 <div className="py-20 text-center opacity-30">
                                     <Layers size={32} className="mx-auto mb-3" />
-                                    <p className="text-xs uppercase tracking-tighter">No annotations yet</p>
+                                    <p className="text-xs uppercase tracking-tighter">하이라이트/메모 없음</p>
                                 </div>
                             ) : (
                                 <div className="space-y-3">
@@ -494,7 +613,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                         <textarea
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="Ask the Research Agent..."
+                            placeholder="연구 에이전트에게 질문하세요..."
                             className="w-full bg-[var(--bg-element)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/30 min-h-[50px] max-h-[150px] resize-none"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -512,7 +631,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                         </button>
                     </div>
                     <p className="mt-2 text-[10px] text-[var(--fg-tertiary)] text-center">
-                        Agent mode uses a planner to coordinate multiple specialized steps.
+                        에이전트 모드는 여러 전문화된 단계를 조정하기 위해 플래너를 사용합니다.
                     </p>
                 </div>
             )}

@@ -1,4 +1,4 @@
-export type AnnotationType = 'definition' | 'discussion' | 'comment' | 'highlight' | 'insight';
+export type AnnotationType = 'definition' | 'discussion' | 'comment' | 'highlight' | 'insight' | 'question' | 'note';
 
 export interface AnnotationTarget {
     paragraphId: string;

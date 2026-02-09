@@ -1,4 +1,4 @@
-import { readFileSafe, writeFileSafe } from './FileSystem';
+import { LocalStorageManager } from './LocalStorageManager';
 import type { Annotation } from '../types/ReaderTypes';
 
 export interface AnnotationData {
@@ -8,36 +8,48 @@ export interface AnnotationData {
 
 export class AnnotationManager {
     filePath: string;
+    storageManager?: LocalStorageManager;
     data: AnnotationData | null = null;
-    sidecarPath: string;
+    
+    // Derived from filepath, e.g., "doc1.html" -> "doc1.json"
+    dataFileName: string;
 
-    constructor(filePath: string) {
+    constructor(filePath: string, storageManager?: LocalStorageManager) {
         this.filePath = filePath;
-        // e.g., "C:/Users/user/Desktop/paper.html" -> "C:/Users/user/Desktop/paper.data.json"
-        this.sidecarPath = filePath.replace(/\.html$/i, '.data.json');
+        this.storageManager = storageManager;
+        
+        // Extract filename and change extension
+        const basename = filePath.split(/[\\/]/).pop() || 'unknown';
+        this.dataFileName = basename.replace(/\.html?$/i, '.json');
     }
 
     async load(): Promise<Annotation[]> {
-        try {
-            const content = await readFileSafe(this.sidecarPath);
-            this.data = JSON.parse(content);
-            return this.data?.annotations || [];
-        } catch (e) {
-            console.log("Sidecar file not found or invalid, creating new.", e);
-            // Initialize if not exists
-            this.data = {
-                sourceFile: this.filePath,
-                annotations: []
-            };
-            return [];
+        if (this.storageManager) {
+            // New "Systematic" Logic: Load from paper-reader-data/annotations/doc.json
+            const loaded = await this.storageManager.loadJson<AnnotationData>(this.dataFileName, 'annotations');
+            if (loaded) {
+                this.data = loaded;
+                return loaded.annotations;
+            }
         }
+        
+        // Fallback or Initial state
+        this.data = {
+            sourceFile: this.filePath,
+            annotations: []
+        };
+        return [];
     }
 
     async save(annotations: Annotation[]) {
-        if (!this.data) this.data = { sourceFile: this.filePath, annotations: [] };
-        this.data.annotations = annotations;
+        this.data = { sourceFile: this.filePath, annotations };
 
-        const content = JSON.stringify(this.data, null, 2);
-        await writeFileSafe(this.sidecarPath, content);
+        if (this.storageManager) {
+            // Save to paper-reader-data/annotations/doc.json
+            await this.storageManager.saveJson(this.dataFileName, this.data, 'annotations');
+        } else {
+             // Shouldn't happen in new flow, but safe fallback logic if needed
+             // ...
+        }
     }
 }

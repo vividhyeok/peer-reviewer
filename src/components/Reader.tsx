@@ -2,7 +2,7 @@
 
 import { readFileSafe } from '../core/FileSystem';
 import { ReaderParser } from '../core/ReaderParser';
-import { Paragraph } from './Paragraph';
+import { Paragraph, MemoizedParagraph } from './Paragraph';
 import { AnnotationManager } from '../core/AnnotationManager';
 import { FloatingToolbar } from './FloatingToolbar';
 import { InputModal } from './InputModal';
@@ -14,6 +14,9 @@ import { LibraryManager, type LibraryItem } from '../core/LibraryManager';
 import { Search, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { SmartExportModal } from './SmartExportModal';
+import { LocalStorageManager } from '../core/LocalStorageManager';
+import { WelcomeScreen } from './WelcomeScreen';
+import { useDocumentLoader } from '../hooks/useDocumentLoader';
 // import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 // Utility Hashing
@@ -58,18 +61,35 @@ interface ReaderProps {
   annotations: Annotation[];
   onAnnotationsChange: (annotations: Annotation[]) => void;
   onExplainImage?: (src: string, alt: string) => void;
+  storageManager: LocalStorageManager;
 }
 
-export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLibrary, onDocumentLoaded, onStructureLoaded, annotations, onAnnotationsChange, onExplainImage }) => {
+import { FlashcardReview } from './FlashcardReview';
+
+import { CS_RESEARCH_PROMPTS } from '../core/Prompts';
+
+export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLibrary, onDocumentLoaded, onStructureLoaded, annotations, onAnnotationsChange, onExplainImage, storageManager }) => {
   const [filePath, setFilePath] = useState<string | null>(null);
-  const [paragraphs, setParagraphs] = useState<ParagraphData[]>([]);
   const [zoomLevel, setZoomLevel] = useState(100);
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
 
   const aiClientRef = useRef<MultiAIClient | null>(null);
   const annotationsRef = useRef<Annotation[]>(annotations);
   const autoHighlightRunRef = useRef<string | null>(null);
   const annotationManagerRef = useRef<AnnotationManager | null>(null);
   const mainScrollRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Hook Integration ---
+  const { loading: isLoading, paragraphs, setParagraphs } = useDocumentLoader({
+      activeFile,
+      storageManager,
+      onStructureLoaded,
+      onDocumentLoaded,
+      onAnnotationsChange,
+      annotationManagerRef
+  });
+  // ------------------------
 
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [toolbarPos, setToolbarPos] = useState({ x: 0, y: 0 });
@@ -85,7 +105,57 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
   const [docSearchQuery, setDocSearchQuery] = useState('');
   const [docSearchIndex, setDocSearchIndex] = useState(0);
 
+  // isLoading is now handled by the hook
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  
+  // Bookmark State
+  const [currentBookmarkId, setCurrentBookmarkId] = useState<string | undefined>(activeFile?.bookmarkParagraphId);
+
+  useEffect(() => {
+     setCurrentBookmarkId(activeFile?.bookmarkParagraphId);
+  }, [activeFile]);
+
+  const handleToggleBookmark = (id: string) => {
+      const next = currentBookmarkId === id ? undefined : id;
+      setCurrentBookmarkId(next);
+      if (activeFile) {
+          const library = LibraryManager.getLibrary();
+          const updated = library.map(item => item.id === activeFile.id ? { ...item, bookmarkParagraphId: next } : item);
+          localStorage.setItem('paper-reader-library', JSON.stringify(updated));
+          if (next) toast.success("Bookmark set");
+      }
+  };
+
+  const handleJumpToBookmark = () => {
+      if (currentBookmarkId) {
+          const el = document.getElementById(`para-${currentBookmarkId}`);
+          if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('ring-4', 'ring-red-500/50');
+              setTimeout(() => el.classList.remove('ring-4', 'ring-red-500/50'), 2000);
+          } else {
+              toast.error("Bookmark location not found in loaded text");
+          }
+      }
+  };
+
+  const handleAddNote = (paragraphId: string, content: string) => {
+      const newAnnotation: Annotation = {
+        id: crypto.randomUUID(),
+        type: 'note',
+        content,
+        createdAt: Date.now(),
+        target: {
+            paragraphId,
+            textHash: 'note',
+            startOffset: 0,
+            endOffset: 0,
+            selectedText: ''
+        }
+      };
+      onAnnotationsChange([...annotations, newAnnotation]);
+      toast.success("Note added");
+  };
 
   const processAnnotation = useCallback(async (type: Annotation['type'], content: string, color?: string, selectionOverride?: SelectionState) => {
     const selection = selectionOverride || currentSelection;
@@ -119,62 +189,34 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     annotationsRef.current = annotations;
   }, [annotations]);
 
+  // Sync scroll progress update when file changes or loading finishes
   useEffect(() => {
-    const load = async () => {
-      if (!activeFile) return;
-      try {
-        setFilePath(activeFile.filePath);
-        LibraryManager.touchItem(activeFile.id);
-        const text = await readFileSafe(activeFile.filePath);
-        const { paragraphs: parsedParagraphs, structure } = ReaderParser.parse(text);
-        setParagraphs(parsedParagraphs);
+     if (!activeFile || isLoading) return;
+     
+     // Set File Path for legacy compat if needed (though hook handles this internally)
+     setFilePath(activeFile.filePath);
 
-        if (onStructureLoaded) {
-          onStructureLoaded(structure);
-        }
+     if (activeFile.lastParagraphId) {
+        setTimeout(() => {
+          const el = document.getElementById(`para-${activeFile.lastParagraphId}`);
+          if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }, 300);
+     } else if (activeFile.progress && mainScrollRef.current) {
+         setTimeout(() => {
+             if (mainScrollRef.current) {
+                const max = mainScrollRef.current.scrollHeight - mainScrollRef.current.clientHeight;
+                mainScrollRef.current.scrollTop = ((activeFile.progress || 0) / 100) * max;
+             }
+         }, 300);
+     }
+  }, [activeFile?.id, isLoading]);
 
-        const fullText = parsedParagraphs.map(p => toPlainTextFromHtml(p.enText)).join('\n\n');
-        if (onDocumentLoaded) {
-          onDocumentLoaded(fullText);
-          window.dispatchEvent(new CustomEvent('document-loaded', { detail: { text: fullText } }));
-        }
-
-        const manager = new AnnotationManager(activeFile.filePath);
-        annotationManagerRef.current = manager;
-        const loaded = await manager.load();
-        onAnnotationsChange(loaded);
-
-        if (loaded.filter(a => a.type === 'insight').length === 0 && autoHighlightRunRef.current !== activeFile.filePath) {
-          autoHighlightRunRef.current = activeFile.filePath;
-          void runAutoHighlight(fullText, parsedParagraphs);
-        }
-
-        if (activeFile.lastParagraphId) {
-          setTimeout(() => {
-            const el = document.getElementById(`para-${activeFile.lastParagraphId}`);
-            if (el) {
-              el.scrollIntoView({ behavior: 'auto', block: 'start' });
-            }
-          }, 200);
-        } else if (activeFile.progress) {
-          setTimeout(() => {
-            if (mainScrollRef.current) {
-              const max = mainScrollRef.current.scrollHeight - mainScrollRef.current.clientHeight;
-              mainScrollRef.current.scrollTop = (activeFile.progress! / 100) * max;
-            }
-          }, 100);
-        }
-      } catch (e: any) {
-        console.error(e);
-        if (activeFile.filePath.startsWith('virtual/')) {
-          toast.error("File content lost. Please re-upload this paper to the library.", { duration: 5000 });
-        } else {
-          toast.error("Failed to load document");
-        }
-      }
-    };
-    void load();
-  }, [activeFile, filePath, onDocumentLoaded]);
+  // Listen for review mode command
+  useEffect(() => {
+      const handleOpenReview = () => setIsReviewOpen(true);
+      window.addEventListener('open-flashcard-review', handleOpenReview);
+      return () => window.removeEventListener('open-flashcard-review', handleOpenReview);
+  }, []);
 
   const runAutoHighlight = async (text: string, currentParagraphs: ParagraphData[]) => {
     if (!aiClientRef.current) return;
@@ -227,6 +269,15 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     }, settings.autoSaveInterval * 1000);
     return () => clearInterval(interval);
   }, [filePath, settings.autoSaveInterval]);
+
+  const annotationsByParagraph = useMemo(() => {
+    const map: Record<string, Annotation[]> = {};
+    annotations.forEach(a => {
+      if (!map[a.target.paragraphId]) map[a.target.paragraphId] = [];
+      map[a.target.paragraphId].push(a);
+    });
+    return map;
+  }, [annotations]);
 
   const docSearchMatches = useMemo(() => {
     if (!docSearchQuery || docSearchQuery.length < 2) return [];
@@ -408,6 +459,12 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         case 'question':
           handleAIAction('question');
           break;
+        case 'document-search':
+          searchInputRef.current?.focus();
+          break;
+        case 'export':
+          setExportModalOpen(true);
+          break;
       }
     };
 
@@ -417,22 +474,98 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     return () => window.removeEventListener('toolbar-action', handleToolbarAction);
   }, [settings, currentSelection, paragraphs, annotations]);
 
+  const handleDefine = async () => {
+    if (!currentSelection || !aiClientRef.current) return;
+    const text = currentSelection.text;
+    const selection = currentSelection; // Capture selection
+
+    const provider = settings.apiKeys.deepseek ? 'deepseek' : (settings.apiKeys.gemini ? 'gemini' : 'openai');
+    const model = provider === 'deepseek' ? 'deepseek-chat' : (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+
+    if (!settings.apiKeys[provider]) {
+        toast.error("AI API Key not configured.");
+        return;
+    }
+
+    const promise = (async () => {
+         const response = await aiClientRef.current!.sendMessage(
+             provider, 
+             model, 
+             [{ role: 'user', content: `Define the term "${text}" in the context of CS/AI research. Provide a crisp definition and 2 bullet points. Answer in Korean. Format: Definition\n- Point 1\n- Point 2` }]
+         );
+         processAnnotation('definition', response.content, undefined, selection);
+    })();
+
+    toast.promise(promise, {
+         loading: 'Generating definition...',
+         success: 'Definition added',
+         error: 'Failed to generate definition'
+    });
+  };
+
+  const handleQuestionPrompt = () => {
+    if (!currentSelection) return;
+    const selection = currentSelection; // Capture selection
+
+    setModalConfig({
+        title: 'Ask about this text',
+        description: `Selected: "${selection.text.slice(0, 30)}..."`,
+        onConfirm: async (question) => {
+             if (!aiClientRef.current) return;
+             const provider = settings.apiKeys.deepseek ? 'deepseek' : (settings.apiKeys.gemini ? 'gemini' : 'openai');
+             const model = provider === 'deepseek' ? 'deepseek-chat' : (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+            
+             if (!settings.apiKeys[provider]) {
+                toast.error("Please configure an AI API key first.");
+                return;
+            }
+
+            const promise = (async () => {
+                 const response = await aiClientRef.current!.sendMessage(
+                     provider, 
+                     model, 
+                     [{ role: 'user', content: CS_RESEARCH_PROMPTS.question(selection.text, question) }]
+                 );
+                 const content = `Q) ${question}\n\nA) ${response.content}`;
+                 processAnnotation('question', content, undefined, selection); 
+             })();
+             
+              toast.promise(promise, {
+                 loading: 'Asking AI...',
+                 success: 'Answer received',
+                 error: 'Failed to get answer'
+            });
+        }
+    });
+    setModalOpen(true);
+  };
+
   const handleAIAction = async (type: string) => {
     if (!currentSelection && type !== 'summarize' && type !== 'critique') {
       toast.error("Please select some text first");
       return;
     }
 
-    const textToProcess = currentSelection?.text || paragraphs.map(p => p.enText).join('\n').slice(0, 5000);
+    const textToProcess = currentSelection?.text || paragraphs.map(p => p.enText).join('\n').slice(0, 15000); // Increased limit for Gemini context
     
     // Open Research Agent with a specific prompt
     let prompt = "";
     switch(type) {
-      case 'explain': prompt = `Please explain the following section in detail, focusing on methodology and core findings: \n\n"${textToProcess}"`; break;
-      case 'summarize': prompt = "Please provide a concise high-level summary of this document, including the main research question and key results."; break;
-      case 'simplify': prompt = `Please explain the following text in very simple terms (ELI5): \n\n"${textToProcess}"`; break;
-      case 'critique': prompt = `Provide an academic critique of this research section. What are the potential limitations or strengths? \n\n"${textToProcess}"`; break;
-      case 'question': prompt = `I have a question about this part: "${textToProcess}"\n\n My question is: `; break;
+      case 'explain': 
+        prompt = CS_RESEARCH_PROMPTS.explain(textToProcess); 
+        break;
+      case 'summarize': 
+        prompt = CS_RESEARCH_PROMPTS.summarize(textToProcess); 
+        break;
+      case 'simplify': 
+        prompt = CS_RESEARCH_PROMPTS.simplify(textToProcess); 
+        break;
+      case 'critique': 
+        prompt = CS_RESEARCH_PROMPTS.critique(textToProcess); 
+        break;
+      case 'question': 
+        prompt = `I have a question about this part: "${textToProcess}"\n\n My question is: `; 
+        break;
       case 'discuss': 
         window.dispatchEvent(new CustomEvent('research-agent-open', {
           detail: { prompt: `Let's discuss this part: "${textToProcess}"`, autoSend: false }
@@ -450,14 +583,14 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
 
   if (!activeFile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-500 animate-in fade-in duration-700 bg-zinc-950">
+      <div className="flex flex-col items-center justify-center h-full text-zinc-500 animate-in fade-in duration-700 bg-white dark:bg-zinc-950">
         <div className="text-center p-10 flex flex-col items-center">
           <div className="relative mb-8 w-24 h-24 flex items-center justify-center">
             <div className="absolute inset-0 bg-blue-500/10 rounded-full animate-pulse" />
             <Search size={48} strokeWidth={1} className="text-blue-500 relative z-10" />
           </div>
-          <h3 className="text-3xl font-serif text-white mb-4 tracking-tight">Ready to Read</h3>
-          <p className="text-base text-zinc-400 max-w-sm mx-auto leading-relaxed mb-8">
+          <h3 className="text-3xl font-serif text-zinc-900 dark:text-white mb-4 tracking-tight">Ready to Read</h3>
+          <p className="text-base text-zinc-600 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed mb-8">
             Select a document from your library to enter the immersive reading space.
           </p>
           <button
@@ -475,29 +608,30 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     <div className="relative w-full h-full flex flex-col">
 
       <div className="absolute top-6 right-6 z-40 flex items-center gap-2 pointer-events-none">
-        <div className="flex items-center gap-1 p-1 bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-full shadow-xl pointer-events-auto transition-all hover:bg-zinc-900">
-          <div className="flex items-center px-2 border-r border-zinc-800">
-            <button onClick={() => setZoomLevel(z => Math.max(50, z - 10))} className="p-1.5 hover:text-white text-zinc-400 rounded-full"><ChevronDown size={14} /></button>
-            <span className="text-[10px] font-mono w-8 text-center text-zinc-400">{zoomLevel}%</span>
-            <button onClick={() => setZoomLevel(z => Math.min(200, z + 10))} className="p-1.5 hover:text-white text-zinc-400 rounded-full"><ChevronUp size={14} /></button>
+        <div className="flex items-center gap-1 p-1 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200 dark:border-zinc-800 rounded-full shadow-xl pointer-events-auto transition-all hover:bg-gray-50 dark:hover:bg-zinc-900">
+          <div className="flex items-center px-2 border-r border-zinc-200 dark:border-zinc-800">
+            <button onClick={() => setZoomLevel(z => Math.max(50, z - 10))} className="p-1.5 hover:text-zinc-900 dark:hover:text-white text-zinc-500 dark:text-zinc-400 rounded-full"><ChevronDown size={14} /></button>
+            <span className="text-[10px] font-mono w-8 text-center text-zinc-500 dark:text-zinc-400">{zoomLevel}%</span>
+            <button onClick={() => setZoomLevel(z => Math.min(200, z + 10))} className="p-1.5 hover:text-zinc-900 dark:hover:text-white text-zinc-500 dark:text-zinc-400 rounded-full"><ChevronUp size={14} /></button>
           </div>
 
-          <div className="flex items-center px-2 border-r border-zinc-800 relative group">
-            <Search size={14} className="text-zinc-400 group-hover:text-white" />
+          <div className="flex items-center px-2 border-r border-zinc-200 dark:border-zinc-800 relative group">
+            <Search size={14} className="text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-white" />
             <input
-              className="w-0 group-hover:w-32 focus:w-32 transition-all duration-300 bg-transparent border-none text-xs text-white focus:outline-none ml-2 placeholder-zinc-600"
+              ref={searchInputRef}
+              className="w-0 group-hover:w-32 focus:w-32 transition-all duration-300 bg-transparent border-none text-xs text-zinc-900 dark:text-white focus:outline-none ml-2 placeholder-zinc-400 dark:placeholder-zinc-600"
               placeholder="Find..."
               value={docSearchQuery}
               onChange={(e) => setDocSearchQuery(e.target.value)}
             />
             {docSearchMatches.length > 0 && (
-              <button onClick={() => navigateSearchResults(1)} className="ml-1 hover:text-white text-zinc-400"><ChevronDown size={12} /></button>
+              <button onClick={() => navigateSearchResults(1)} className="ml-1 hover:text-zinc-900 dark:hover:text-white text-zinc-500 dark:text-zinc-400"><ChevronDown size={12} /></button>
             )}
           </div>
 
           <button
             onClick={() => setExportModalOpen(true)}
-            className="p-2 text-zinc-400 hover:text-white transition-all mr-1"
+            className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all mr-1"
             title="Smart Export (Synthesis)"
           >
             <Download size={18} />
@@ -516,25 +650,38 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
             <div className="prose-reader">
               {paragraphs.map((para) => {
                 const Tag = (para.element || 'div') as React.ElementType;
+                // Fix for nesting error: avoid <li> nesting if Paragraph is just a container.
+                // However, Reader uses `SafeTag` as the container. If tag is 'li' or 'p', we might have issues if Paragraph uses block elements.
+                // Safest bet for clean DOM: always use 'div' for wrapper, rely on internal semantic markup. 
+                // But we want to preserve header styling etc. 
+                // If tag is 'li', simply changing to 'div' is safe visually if CSS handles it. The issue usually is <ul><SafeTag>... where SafeTag is div appearing as li.
+                // But the log says `<li> matches <li id="para">`. 
+                // Let's force div for wrapper.
+                const SafeTag = 'div'; 
+                
                 return (
-                  <Tag
+                  <SafeTag
                     key={para.id}
                     id={`para-${para.id}`}
                     className="group relative transition-all duration-500"
                   >
-                    <Paragraph
+                    <MemoizedParagraph
                       data={para}
                       isKoreanPrimary={settings.isKoreanPrimary}
                       onAIAlign={handleAIAlign}
                       onRepair={handleAIRepair}
-                      annotations={annotations.filter(a => a.target.paragraphId === para.id)}
+                      annotations={annotationsByParagraph[para.id] || []}
                       isSearchMatch={docSearchMatches.some(m => m.paragraphId === para.id)}
+                      highlightTerm={docSearchQuery}
                       onDeleteAnnotation={(id) => {
                         onAnnotationsChange(annotations.filter((a) => a.id !== id));
                       }}
                       onExplainImage={onExplainImage}
+                      isBookmarked={currentBookmarkId === para.id}
+                      onToggleBookmark={handleToggleBookmark}
+                      onAddNote={handleAddNote}
                     />
-                  </Tag>
+                  </SafeTag>
                 );
               })}
             </div>
@@ -548,14 +695,8 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         visible={toolbarVisible}
         highlightColors={settings.highlightColors}
         onHighlight={(color) => processAnnotation('highlight', '', color)}
-        onDefine={() => {
-          setModalConfig({
-            title: 'Add custom definition/note',
-            onConfirm: (val) => processAnnotation('definition', val)
-          });
-          setModalOpen(true);
-        }}
-        onQuestion={() => handleAIAction('question')}
+        onDefine={handleDefine}
+        onQuestion={handleQuestionPrompt}
         onChat={() => handleAIAction('discuss')}
         onExplain={() => handleAIAction('explain')}
         onSummarize={() => handleAIAction('summarize')}
@@ -585,6 +726,12 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
           title={activeFile.title}
         />
       )}
+
+      <FlashcardReview
+          isOpen={isReviewOpen}
+          onClose={() => setIsReviewOpen(false)}
+          annotations={annotations}
+      />
     </div>
   );
 };

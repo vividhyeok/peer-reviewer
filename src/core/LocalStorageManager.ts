@@ -17,6 +17,10 @@ export class LocalStorageManager {
     this.config = this.loadConfig();
   }
 
+  get needsReconnect(): boolean {
+    return this.config.useFileSystem && this.directoryHandle === null;
+  }
+
   private loadConfig(): StorageConfig {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -87,6 +91,110 @@ export class LocalStorageManager {
   }
 
   /**
+   * 루트 디렉토리의 모든 HTML 파일 목록 조회
+   */
+  async listFiles(extensions: string[] = ['.html', '.htm']): Promise<string[]> {
+    const files: string[] = [];
+
+    if (this.config.useFileSystem && this.directoryHandle) {
+      try {
+        // @ts-ignore - FileSystemDirectoryHandle is async iterable
+        for await (const [name, handle] of this.directoryHandle.entries()) {
+          if (handle.kind === 'file') {
+            const lowerName = name.toLowerCase();
+            if (extensions.some(ext => lowerName.endsWith(ext))) {
+              files.push(name);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to list files from directory', e);
+      }
+    } else {
+      // localStorage fallback
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('data:')) {
+          const name = key.replace('data:', '');
+          const lowerName = name.toLowerCase();
+          if (extensions.some(ext => lowerName.endsWith(ext))) {
+            files.push(name);
+          }
+        }
+      }
+    }
+    return files;
+  }
+
+  /**
+   * 루트 디렉토리에서 파일 내용 읽기 (Library papers loading)
+   */
+  async loadFromRoot(filename: string): Promise<string | null> {
+    if (!this.config.useFileSystem || !this.directoryHandle) return null;
+
+    try {
+      const fileHandle = await this.directoryHandle.getFileHandle(filename, { create: false });
+      const file = await fileHandle.getFile();
+      return await file.text();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * 일반 JSON 데이터 저장 (설정 예: settings.json, 주석 예: annotations/doc1.json)
+   */
+  async saveJson(filename: string, data: any, folderName?: string): Promise<void> {
+    if (this.config.useFileSystem && this.directoryHandle) {
+        try {
+            // 기본 폴더는 paper-reader-data
+            let targetHandle = await this.directoryHandle.getDirectoryHandle(DATA_FOLDER, { create: true });
+            
+            // 하위 폴더 지정 시 (예: 'annotations')
+            if (folderName) {
+                targetHandle = await targetHandle.getDirectoryHandle(folderName, { create: true });
+            }
+
+            const fileHandle = await targetHandle.getFileHandle(filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(JSON.stringify(data, null, 2));
+            await writable.close();
+        } catch (e) {
+            console.error(`Failed to save JSON ${folderName}/${filename}`, e);
+        }
+    } else {
+        // LocalStorage Fallback
+        const key = folderName ? `${folderName}:${filename}` : `data:${filename}`;
+        localStorage.setItem(key, JSON.stringify(data));
+    }
+  }
+
+  /**
+   * 일반 JSON 데이터 로드
+   */
+  async loadJson<T>(filename: string, folderName?: string): Promise<T | null> {
+    if (this.config.useFileSystem && this.directoryHandle) {
+        try {
+            let targetHandle = await this.directoryHandle.getDirectoryHandle(DATA_FOLDER, { create: false });
+            if (folderName) {
+                targetHandle = await targetHandle.getDirectoryHandle(folderName, { create: false });
+            }
+            const fileHandle = await targetHandle.getFileHandle(filename, { create: false });
+            const file = await fileHandle.getFile();
+            const text = await file.text();
+            return JSON.parse(text) as T;
+        } catch (e) {
+            return null; // File not found
+        }
+    } else {
+        // LocalStorage Fallback
+        const key = folderName ? `${folderName}:${filename}` : `data:${filename}`;
+        const stored = localStorage.getItem(key);
+        return stored ? JSON.parse(stored) as T : null;
+    }
+  }
+
+  /**
    * IndexedDB에 DirectoryHandle 저장 (브라우저 재시작 후에도 유지)
    */
   private async saveDirectoryHandle(handle: FileSystemDirectoryHandle) {
@@ -107,7 +215,7 @@ export class LocalStorageManager {
   /**
    * IndexedDB에서 DirectoryHandle 복원
    */
-  async restoreDirectoryHandle(): Promise<boolean> {
+  async restoreDirectoryHandle(requestIfPrompt: boolean = true): Promise<boolean> {
     try {
       const db = await this.openDatabase();
       
@@ -121,22 +229,30 @@ export class LocalStorageManager {
 
       if (!handle) return false;
 
-      this.directoryHandle = handle;
-
       // 권한 재확인
       // @ts-ignore
-      const permission = await this.directoryHandle!.queryPermission({ mode: 'readwrite' });
-      if (permission !== 'granted') {
+      const permission = await handle.queryPermission({ mode: 'readwrite' });
+      
+      if (permission === 'granted') {
+        this.directoryHandle = handle;
+        this.config.useFileSystem = true;
+        return true;
+      }
+
+      if (requestIfPrompt) {
         // @ts-ignore
-        const request = await this.directoryHandle!.requestPermission({ mode: 'readwrite' });
-        if (request !== 'granted') {
-          this.directoryHandle = null;
-          return false;
+        const request = await handle.requestPermission({ mode: 'readwrite' });
+        if (request === 'granted') {
+          this.directoryHandle = handle;
+          this.config.useFileSystem = true;
+          return true;
         }
       }
 
-      this.config.useFileSystem = true;
-      return true;
+      // If we are here, we have a handle but no permission and didn't/couldn't ask
+      // or user denied.
+      // We keep directoryHandle null but don't clear config yet so we can ask again.
+      return false;
     } catch (e) {
       console.error('Failed to restore directory handle', e);
       return false;
@@ -222,6 +338,37 @@ export class LocalStorageManager {
   }
 
   /**
+   * 임의 경로의 파일 로드 (Blob URL)
+   * 상대 경로(./img/fig.png) 또는 절대 경로 유사 패턴 지원
+   */
+  async loadFileAsUrl(relativePath: string): Promise<string | null> {
+    if (!this.config.useFileSystem || !this.directoryHandle) return null;
+
+    try {
+      // 경로 정규화: 백슬래시를 슬래시로 변경하고 시작 부분의 ./ 제거
+      const normalizedPath = relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+      const parts = normalizedPath.split('/');
+      
+      let currentDir = this.directoryHandle;
+      
+      // 디렉터리 순회
+      for (let i = 0; i < parts.length - 1; i++) {
+        const dirName = parts[i];
+        if (dirName === '' || dirName === '.') continue;
+        currentDir = await currentDir.getDirectoryHandle(dirName, { create: false });
+      }
+      
+      const fileName = parts[parts.length - 1];
+      const fileHandle = await currentDir.getFileHandle(fileName, { create: false });
+      const file = await fileHandle.getFile();
+      return URL.createObjectURL(file);
+    } catch (e) {
+      // console.warn(`Failed to resolve file path: ${relativePath}`, e);
+      return null;
+    }
+  }
+
+  /**
    * 이미지 저장 (Blob)
    */
   async saveImage(filename: string, blob: Blob): Promise<void> {
@@ -267,37 +414,6 @@ export class LocalStorageManager {
     }
   }
 
-  /**
-   * 모든 파일 목록 가져오기
-   */
-  async listFiles(): Promise<string[]> {
-    if (this.config.useFileSystem && this.directoryHandle) {
-      try {
-        const dataFolder = await this.directoryHandle.getDirectoryHandle(DATA_FOLDER, { create: false });
-        const files: string[] = [];
-        // @ts-ignore
-        for await (const entry of dataFolder.values()) {
-          if (entry.kind === 'file') {
-            files.push(entry.name);
-          }
-        }
-        return files;
-      } catch (e) {
-        console.error('Failed to list files', e);
-        return [];
-      }
-    } else {
-      // localStorage fallback
-      const files: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key?.startsWith('data:')) {
-          files.push(key.replace('data:', ''));
-        }
-      }
-      return files;
-    }
-  }
 
   /**
    * 현재 저장 방식 확인

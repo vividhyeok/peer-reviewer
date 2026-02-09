@@ -65,7 +65,7 @@ export const AIInsights: React.FC<AIInsightsProps> = ({ settings, documentFullTe
             <div className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Sparkles size={16} className="text-[var(--accent)]" />
-                    <span className="font-semibold text-xs uppercase tracking-wider text-[var(--fg-secondary)]">AI Insights</span>
+                    <span className="font-semibold text-xs uppercase tracking-wider text-[var(--fg-secondary)]">AI 분석 (Insights)</span>
                 </div>
                 {documentFullText && !loading && (
                     <button onClick={generateAnalysis} className="p-2 hover:bg-[var(--bg-hover)] rounded-lg transition-colors text-[var(--fg-secondary)] hover:text-[var(--fg-primary)]" title="Regenerate">
@@ -78,12 +78,12 @@ export const AIInsights: React.FC<AIInsightsProps> = ({ settings, documentFullTe
                 {!documentFullText ? (
                     <div className="flex flex-col items-center justify-center h-64 text-[var(--fg-tertiary)] opacity-60">
                         <BookOpenText size={48} strokeWidth={1} className="mb-4" />
-                        <p className="text-sm font-medium">Select a document</p>
+                        <p className="text-sm font-medium">문서를 선택해주세요</p>
                     </div>
                 ) : !analysis ? (
                     <div className="flex flex-col items-center justify-center h-64">
                         <p className="text-sm text-[var(--fg-secondary)] mb-6 text-center max-w-[200px]">
-                            Generate a briefing using your active AI model.
+                            현재 설정된 AI 모델을 사용하여<br/>문서의 핵심 브리핑을 생성합니다.
                         </p>
                         <button
                             onClick={generateAnalysis}
@@ -92,12 +92,12 @@ export const AIInsights: React.FC<AIInsightsProps> = ({ settings, documentFullTe
                         >
                             <span className="absolute inset-0 rounded-xl bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
                             {loading ? <RefreshCw className="animate-spin" size={16} /> : <Zap size={16} fill="white" />}
-                            <span>Generate Briefing</span>
+                            <span>브리핑 생성 (Generate)</span>
                         </button>
                     </div>
                 ) : (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        <div className="prose prose-sm prose-invert max-w-none">
+                        <div className="prose prose-sm prose-invert max-w-none text-left">
                             <div className="text-[10px] uppercase tracking-widest text-[var(--fg-tertiary)] mb-4 pb-2 border-b border-[var(--border)]">
                                 Intelligence Briefing
                             </div>

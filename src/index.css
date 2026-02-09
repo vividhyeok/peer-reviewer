@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./extra_styles.css";
 
 /* Base Layout & Typography */
 :root {
@@ -25,6 +26,40 @@
   --accent-glow: rgba(59, 130, 246, 0.15);
   --glass-bg: rgba(24, 24, 27, 0.7);
   --glass-border: rgba(255, 255, 255, 0.08);
+  
+  --bg-primary-950: #09090b;
+  --bg-secondary-900: #18181b;
+  --bg-tertiary-800: #27272a;
+  
+  --text-primary-100: #f4f4f5;
+  --text-secondary-400: #a1a1aa;
+}
+
+[data-theme='light'] {
+  --bg-app: #ffffff;
+  --bg-panel: #f8f9fa;
+  --bg-element: #f1f5f9;
+  --bg-hover: #e2e8f0; 
+  --bg-tooltip: #ffffff;
+
+  --border: #e2e8f0;
+
+  --fg-primary: #0f172a;
+  --fg-secondary: #475569;
+  --fg-tertiary: #94a3b8;
+
+  --accent: #2563eb;
+  --accent-dim: #1d4ed8;
+  --accent-glow: rgba(37, 99, 235, 0.15);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.06);
+
+  --bg-primary-950: #ffffff;
+  --bg-secondary-900: #f8fafc;
+  --bg-tertiary-800: #f1f5f9;
+
+  --text-primary-100: #0f172a;
+  --text-secondary-400: #64748b;
 }
 
 body {

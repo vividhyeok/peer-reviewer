@@ -13,6 +13,7 @@ export interface LibraryItem {
   lastOpened: number;
   progress?: number; // 0-100
   lastParagraphId?: string; // For precise scroll resumption
+  bookmarkParagraphId?: string; // Explicit user bookmark
   folder?: string; // For grouping
 }
 

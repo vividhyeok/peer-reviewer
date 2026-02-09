@@ -1,0 +1,15 @@
+
+/* AI Annotation Styles */
+abbr.ds-def {
+  text-decoration: underline dotted #4ade80; /* green-400 */
+  text-decoration-thickness: 3px;
+  cursor: help;
+  text-decoration-skip-ink: none;
+}
+
+abbr.ds-q {
+  text-decoration: underline dotted #60a5fa; /* blue-400 */
+  text-decoration-thickness: 3px;
+  cursor: help;
+  text-decoration-skip-ink: none;
+}

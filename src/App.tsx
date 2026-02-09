@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Reader } from './components/Reader';
 import { Toaster, toast } from 'sonner';
-import { Settings, Sparkles, Languages, Download, Search, BookOpen } from 'lucide-react';
+import { Settings, Sparkles, Languages, Download, Search, BookOpen, Brain } from 'lucide-react';
 import { AdvancedSettings as SettingsDialog } from './components/AdvancedSettings';
 import { CommandPalette, type CommandItem } from './components/CommandPalette';
 import { TopToolbar } from './components/TopToolbar';
@@ -28,6 +28,8 @@ function App() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [docStructure, setDocStructure] = useState<PaperStructure | undefined>(undefined);
   const [initialAgentQuery, setInitialAgentQuery] = useState<string | undefined>(undefined);
+  
+  const activeFile = useMemo(() => library.find(i => i.id === activeFileId) || null, [library, activeFileId]);
 
   const aiClientRef = useRef(new MultiAIClient(settings.apiKeys));
   const storageManagerRef = useRef(new LocalStorageManager());
@@ -63,13 +65,94 @@ function App() {
   const handleSaveSettings = useCallback((newSettings: AppSettings) => {
     setSettings(newSettings);
     SettingsManager.save(newSettings);
+    
+    // Systematic Persistence: Save settings.json to local folder if connected
+    if (storageManagerRef.current && !storageManagerRef.current.needsReconnect) {
+        storageManagerRef.current.saveJson('settings.json', newSettings);
+    }
+
     aiClientRef.current = new MultiAIClient(newSettings.apiKeys);
   }, []);
 
   // Theme Management
   useEffect(() => {
+    // Set data attribute for CSS variables
     document.documentElement.setAttribute('data-theme', settings.theme);
+    
+    // Set class for Tailwind dark mode
+    if (settings.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
   }, [settings.theme]);
+
+  const syncLibraryWithStorage = useCallback(async () => {
+    const files = await storageManagerRef.current.listFiles();
+    if (files.length === 0) return;
+
+    let addedCount = 0;
+    const library = LibraryManager.getLibrary();
+    
+    files.forEach(filename => {
+        const exists = library.some(item => item.filePath === filename || item.filePath === '/' + filename);
+        if (!exists) {
+           LibraryManager.addItem(filename);
+           addedCount++;
+        }
+    });
+    
+    if (addedCount > 0) {
+        refreshLibrary();
+        toast.success(`${addedCount} new papers added from Local Folder`);
+    }
+  }, [refreshLibrary]);
+
+  // Local Folder Reconnect Check (Browser Security Handling)
+  useEffect(() => {
+    const checkStorage = async () => {
+      // Attempt silent restore (false = do not prompt)
+      const restored = await storageManagerRef.current.restoreDirectoryHandle(false);
+      
+      if (restored) {
+        await syncLibraryWithStorage();
+        
+        // Systematic Persistence: Try to load settings.json
+        const localSettings = await storageManagerRef.current.loadJson<AppSettings>('settings.json');
+        if (localSettings) {
+            setSettings(prev => ({
+                ...prev,
+                ...localSettings,
+                // Merge critical things logic if needed, but simple overwrite is often what user expects from "Sync"
+            }));
+            toast.success("Settings loaded from local folder");
+        }
+      }
+
+      // If silent restore failed but we are configured to use FileSystem, show a reconnect button
+      if (!restored && storageManagerRef.current.needsReconnect) {
+        toast.info("Local Storage Disconnected", {
+            description: "Browser requires permission to write to your local folder again.",
+            duration: Infinity,
+            action: {
+                label: "Reconnect",
+                onClick: async () => {
+                    const result = await storageManagerRef.current.restoreDirectoryHandle(true);
+                    if (result) {
+                        toast.success("Storage Connected");
+                        await syncLibraryWithStorage();
+                    } else {
+                         // Fallback
+                        await storageManagerRef.current.requestDirectory();
+                        await syncLibraryWithStorage();
+                    }
+                }
+            }
+        });
+      }
+    };
+    checkStorage();
+  }, [syncLibraryWithStorage]);
 
   // Global Keybindings & Events
   useEffect(() => {
@@ -143,6 +226,16 @@ function App() {
       action: () => {
         const nextTheme = settings.theme === 'dark' ? 'light' : 'dark';
         handleSaveSettings({ ...settings, theme: nextTheme });
+      }
+    },
+    {
+      id: 'open-review',
+      label: 'Review Concepts',
+      description: 'Start flashcard review of definitions and questions',
+      icon: <Brain size={18} />,
+      shortcut: 'Alt + R',
+      action: () => {
+        window.dispatchEvent(new Event('open-flashcard-review'));
       }
     },
     {
@@ -248,7 +341,11 @@ function App() {
       }
 
       if (!file.oneLineSummary) {
-        const summary = await aiClientRef.current.generateOneLineSummary({ provider: 'deepseek', modelId: 'deepseek-chat' }, text);
+        // Use a more reliable default model if DeepSeek is not configured perfectly
+        const summary = await aiClientRef.current.generateOneLineSummary(
+             { provider: 'gemini', modelId: 'gemini-1.5-flash' }, 
+             text
+        );
         LibraryManager.updateMetadata(file.id, { oneLineSummary: summary });
       }
 
@@ -277,7 +374,7 @@ function App() {
   }, []);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-zinc-950 text-zinc-100 font-sans flex flex-col">
+    <div className="relative w-screen h-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans flex flex-col">
       {/* MS Word style Ribbon Top Bar */}
       <TopToolbar 
         settings={settings}
@@ -307,7 +404,6 @@ function App() {
           }}
           settings={settings}
           onOpenSettings={() => setSettingsOpen(true)}
-            onExplainImage={handleExplainImage}
           structure={docStructure}
         />
 
@@ -320,6 +416,8 @@ function App() {
             onStructureLoaded={setDocStructure}
             annotations={annotations}
             onAnnotationsChange={setAnnotations}
+            storageManager={storageManagerRef.current}
+            onExplainImage={handleExplainImage}
           />
         </div>
 
@@ -339,6 +437,7 @@ function App() {
           annotations={annotations}
           onOpenSettings={() => setSettingsOpen(true)}
           initialAgentQuery={initialAgentQuery}
+          storageManager={storageManagerRef.current}
         />
       </div>
 
@@ -350,6 +449,8 @@ function App() {
           onClose={() => setSettingsOpen(false)}
           settings={settings}
           onSave={handleSaveSettings}
+          storageManager={storageManagerRef.current}
+          onSyncLibrary={syncLibraryWithStorage}
         />
       )}
 
