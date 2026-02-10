@@ -437,11 +437,11 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                       <div className="flex items-center gap-2">
                         <HardDrive size={18} className="text-blue-500" />
                         <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                          저장 위치 설정
+                          저장 위치 정보 (Storage Status)
                         </h3>
                       </div>
                       <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                        기본적으로 브라우저 저장소를 사용합니다. 로컬 폴더를 지정하면 브라우저 캐시/쿠키 삭제와 무관하게 데이터가 유지됩니다.
+                        현재 활성화된 저장소 모드 상태입니다.
                       </p>
                     </div>
 
@@ -450,85 +450,65 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                          현재 저장 위치
+                          연결 상태
                         </span>
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-                          {storageInfo}
-                        </span>
+                        <div className="flex items-center gap-2">
+                           {storageManager.isDevServer ? (
+                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                  Dev Server Connected
+                               </span>
+                           ) : (
+                               <span className="text-xs text-zinc-500 font-mono">{storageInfo}</span>
+                           )}
+                        </div>
                       </div>
 
+                      {storageManager.isDevServer ? (
+                          <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded text-xs text-zinc-500 dark:text-zinc-400 break-all border border-zinc-100 dark:border-zinc-800">
+                             프로젝트 내부 <code>paper-reader-data</code> 폴더에 자동 저장됩니다.
+                          </div>
+                      ) : (
+                        /* Only show folder picker if NOT in dev server mode */
+                        <>
+                          <button
+                            onClick={async () => {
+                              const success = await storageManager.requestDirectory();
+                              if (success) {
+                                setStorageInfo(storageManager.getStorageInfo());
+                                if (onSyncLibrary) {
+                                    onSyncLibrary();
+                                }
+                                alert('로컬 폴더가 설정되었습니다!');
+                              }
+                            }}
+                            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                          >
+                            <FolderOpen size={16} />
+                            로컬 폴더 선택 (Legacy)
+                          </button>
+                          <p className="text-[10px] text-zinc-500">배포 환경에서는 로컬 폴더 선택이 필요합니다.</p>
+                        </>
+                      )}
+
+                      {!storageManager.isDevServer && (
+                         <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800" />
+                      )}
+                      
+                      {/* Cache clear button for maintenance */}
                       <button
                         onClick={async () => {
-                          const success = await storageManager.requestDirectory();
-                          if (success) {
-                            setStorageInfo(storageManager.getStorageInfo());
-                            if (onSyncLibrary) {
-                                onSyncLibrary();
-                            }
-                            alert('로컬 폴더가 설정되었습니다!\\n\\n이제부터 모든 데이터는 선택한 폴더에 저장됩니다.\\n폴더 내의 HTML 파일들이 라이브러리에 추가됩니다.');
-                          }
+                           if(confirm("모든 캐시 데이터(AI 응답, 분석 결과 등)를 삭제하시겠습니까? 문서나 주석은 유지됩니다.")) {
+                               await storageManager.clearCache();
+                               alert("캐시가 초기화되었습니다.");
+                           }
                         }}
-                        className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                        className="w-full px-4 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
                       >
-                        <FolderOpen size={16} />
-                        로컬 폴더 선택
+                         <Database size={16} />
+                         캐시 비우기 (Clear Cache)
                       </button>
 
-                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                        ⚠️ Chrome, Edge 브라우저에서만 지원됩니다. 폴더 선택 후 브라우저를 재시작해도 설정이 유지됩니다.
-                      </p>
-                    </div>
-
-                    <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800" />
-
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Database size={18} className="text-purple-500" />
-                        <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                          데이터 마이그레이션
-                        </h3>
-                      </div>
-                      <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                        브라우저 저장소의 기존 데이터를 로컬 폴더로 복사합니다.
-                      </p>
-
-                      <button
-                        onClick={async () => {
-                          if (!storageManager.isUsingFileSystem()) {
-                            alert('먼저 로컬 폴더를 선택하세요.');
-                            return;
-                          }
-
-                          if (!confirm('브라우저 저장소의 모든 데이터를 로컬 폴더로 복사합니다. 계속하시겠습니까?')) {
-                            return;
-                          }
-
-                          setIsMigrating(true);
-                          try {
-                            const count = await storageManager.migrateToFileSystem();
-                            alert(`✅ ${count}개 파일이 이동되었습니다!`);
-                          } catch (e: any) {
-                            alert(`❌ 마이그레이션 실패: ${e.message}`);
-                          } finally {
-                            setIsMigrating(false);
-                          }
-                        }}
-                        disabled={isMigrating || !storageManager.isUsingFileSystem()}
-                        className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
-                      >
-                        {isMigrating ? '마이그레이션 중...' : '로컬 폴더로 데이터 복사'}
-                      </button>
-                    </div>
-
-                    <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
-                      <div className="flex items-start gap-2">
-                        <span className="text-blue-600 dark:text-blue-400 text-xs font-bold">💡 TIP</span>
-                      </div>
-                      <ul className="text-[11px] text-blue-700 dark:text-blue-300 space-y-1 pl-5 list-disc">
-                        <li>로컬 폴더를 선택하면 문서, 주석, 설정이 모두 폴더에 저장됩니다</li>
-                        <li>이미지도 별도 파일로 저장되어 메모리 절약 효과가 있습니다</li>
-                        <li>브라우저를 삭제하거나 재설치해도 데이터가 유지됩니다</li>
-                      </ul>
                     </div>
                   </div>
                 </div>

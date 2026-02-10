@@ -49,7 +49,7 @@ export function useDocumentLoader({
         // Try File System First (Priority: Disk > Cache)
         if (storageManager) {
           const basename = activeFile.filePath.split(/[\\/]/).pop() || activeFile.filePath;
-          text = await storageManager.loadFromRoot(basename);
+          text = await storageManager.readFile(basename);
         }
 
         // Fallback to safe reader (cache/public)
@@ -62,7 +62,7 @@ export function useDocumentLoader({
 
         // 4. Hydrate Images (Local File System)
         let finalParagraphs = parsedParagraphs;
-        if (storageManager && storageManager.isUsingFileSystem()) {
+        if (storageManager && storageManager.isConnected) {
           finalParagraphs = await Promise.all(parsedParagraphs.map(async (p) => {
             if (p.type === 'image' && p.metadata?.src && 
                 !p.metadata.src.startsWith('http') && 

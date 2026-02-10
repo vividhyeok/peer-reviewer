@@ -12,6 +12,7 @@ import { LibraryManager, type LibraryItem } from './core/LibraryManager';
 import { MultiAIClient } from './core/MultiAIClient';
 import { type Annotation, type PaperStructure } from './types/ReaderTypes';
 import { LocalStorageManager } from './core/LocalStorageManager';
+import { AnnotationManager } from './core/AnnotationManager';
 
 function App() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
@@ -111,8 +112,8 @@ function App() {
   // Local Folder Reconnect Check (Browser Security Handling)
   useEffect(() => {
     const checkStorage = async () => {
-      // Attempt silent restore (false = do not prompt)
-      const restored = await storageManagerRef.current.restoreDirectoryHandle(false);
+      // Attempt silent restore
+      const restored = await storageManagerRef.current.restoreDirectoryHandle();
       
       if (restored) {
         await syncLibraryWithStorage();
@@ -137,7 +138,7 @@ function App() {
             action: {
                 label: "Reconnect",
                 onClick: async () => {
-                    const result = await storageManagerRef.current.restoreDirectoryHandle(true);
+                    const result = await storageManagerRef.current.reconnect();
                     if (result) {
                         toast.success("Storage Connected");
                         await syncLibraryWithStorage();
@@ -153,6 +154,19 @@ function App() {
     };
     checkStorage();
   }, [syncLibraryWithStorage]);
+
+  // Auto-save Annotations (Debounced)
+  useEffect(() => {
+    if (!activeFileId || annotations.length === 0) return;
+    const timer = setTimeout(() => {
+        const file = library.find(f => f.id === activeFileId);
+        if (file && storageManagerRef.current) {
+            const manager = new AnnotationManager(file.filePath, storageManagerRef.current);
+            manager.save(annotations).catch(() => {});
+        }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [annotations, activeFileId, library]);
 
   // Global Keybindings & Events
   useEffect(() => {
