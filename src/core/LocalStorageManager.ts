@@ -3,7 +3,7 @@
 // 2. Prod Mode: Uses File System Access API (Manual folder pick) -> Browser sandbox
 // 3. Fallback: LocalStorage (Memory)
 
-import { FileSystemDirectoryHandle } from '../types/FileSystem';
+import type { FileSystemDirectoryHandle } from '../types/FileSystem';
 
 // Constants
 const CACHE_FOLDER = 'cache';
