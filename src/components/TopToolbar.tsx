@@ -10,6 +10,8 @@ import {
   BookOpen,
   PanelLeft,
   Sparkles,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { type AppSettings } from '../types/settings';
@@ -17,11 +19,19 @@ import { type AppSettings } from '../types/settings';
 interface TopToolbarProps {
   settings: AppSettings;
   onSaveSettings: (settings: AppSettings) => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 export const TopToolbar: React.FC<TopToolbarProps> = ({ 
   settings, 
-  onSaveSettings
+  onSaveSettings,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo
 }) => {
   const getShortcut = (action: string) => {
     return settings.shortcuts.find(s => s.action === action)?.keys || '';
@@ -66,7 +76,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
         <button
           onClick={() => handleAction(action)}
           className={clsx(
-            "p-2 rounded-lg transition-all flex flex-col items-center gap-0.5 min-w-[64px]",
+            "p-2 rounded-lg transition-all flex flex-col items-center gap-0.5 min-w-[64px] active:scale-95 hover:-translate-y-0.5",
             active ? "bg-blue-100 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400" : colorClass
           )}
         >
@@ -75,9 +85,9 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
         </button>
         
         {/* Tooltip */}
-        <div className="absolute top-full mt-2 px-2 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[1000] whitespace-nowrap">
-          <p className="text-[11px] font-bold text-zinc-900 dark:text-white">{label}</p>
-          {shortcut && <p className="text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5">단축키: {shortcut}</p>}
+        <div className="absolute top-full mt-2 px-3 py-2 bg-zinc-900/90 dark:bg-zinc-100/90 backdrop-blur-md border border-white/10 dark:border-black/5 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-[1000] whitespace-nowrap">
+          <p className="text-[11px] font-bold text-zinc-100 dark:text-zinc-900">{label}</p>
+          {shortcut && <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-0.5 font-mono bg-white/10 dark:bg-black/10 px-1 rounded w-fit">{shortcut}</p>}
         </div>
       </div>
     );
@@ -89,17 +99,49 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
       <div className="flex items-center gap-1 border-r border-zinc-200 dark:border-zinc-800 pr-4 mr-2">
         <ToolButton 
           icon={PanelLeft} 
-          label="Library" 
+          label="서재" 
           action="toggle-library" 
           shortcutAction="toggle-library"
         />
         <ToolButton 
           icon={Sparkles} 
-          label="AI Agent" 
+          label="에이전트" 
           action="toggle-agent" 
           shortcutAction="toggle-agent"
         />
       </div>
+
+      {/* Group: History */}
+      {(onUndo || onRedo) && (
+        <div className="flex items-center gap-1 border-r border-zinc-200 dark:border-zinc-800 pr-4 mr-2">
+          {onUndo && (
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className={clsx(
+                "p-2 rounded-lg transition-all flex flex-col items-center gap-0.5 min-w-[50px] active:scale-95 group",
+                !canUndo ? "opacity-30 cursor-not-allowed text-zinc-400" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              )}
+            >
+              <Undo2 size={18} strokeWidth={2} />
+              <span className="text-[10px] font-medium">실행취소</span>
+            </button>
+          )}
+          {onRedo && (
+             <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              className={clsx(
+                "p-2 rounded-lg transition-all flex flex-col items-center gap-0.5 min-w-[50px] active:scale-95 group",
+                !canRedo ? "opacity-30 cursor-not-allowed text-zinc-400" : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              )}
+            >
+              <Redo2 size={18} strokeWidth={2} />
+              <span className="text-[10px] font-medium">다시실행</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Group: Core Tools */}
       <div className="flex items-center gap-1 border-r border-zinc-200 dark:border-zinc-800 pr-4 mr-2">
@@ -171,7 +213,7 @@ export const TopToolbar: React.FC<TopToolbarProps> = ({
       <div className="flex items-center gap-1">
         <ToolButton 
           icon={Settings} 
-          label="Settings" 
+          label="설정" 
           action="open-settings" 
           shortcutAction="toggle-settings"
         />

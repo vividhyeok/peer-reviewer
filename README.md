@@ -1,191 +1,45 @@
-# 논문리뷰어 (Paper Reader)
+# Paper Reviewer
 
-HTML 논문을 PDF 뷰어처럼 읽고, AI 기능으로 이해/요약/토론을 돕는 웹 애플리케이션입니다. 문서 라이브러리, 주석, 번역, Obsidian 내보내기까지 한 번에 제공합니다.
+**Paper Reviewer**는 연구자와 개발자를 위한 **AI 기반 로컬 논문 독해/리뷰 도구**입니다.
+복잡한 설치 과정 없이, 웹 브라우저 하나로 로컬 파일을 관리하고 AI의 도움을 받아 논문을 깊이 있게 분석할 수 있습니다.
 
-## 📁 개발자 모드: 자동 로컬 저장 (Dev Server Storage)
+![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Version](https://img.shields.io/badge/version-0.1.0-green.svg)
 
-개발 환경(`npm run dev`)에서는 번거로운 폴더 권한 승인이나 설정 없이, **프로젝트 폴더 내부에 데이터가 자동 저장**됩니다.
+## ✨ 특징 (Features)
 
-### 동작 원리
-1. Vite 개발 서버가 단순한 API 서버 역할을 수행하여 로컬 파일 시스템에 직접 접근합니다.
-2. 앱 실행 시 자동으로 연결되며, 사용자는 별도의 설정이 필요 없습니다.
-3. 데이터는 프로젝트 루트의 `paper-reader-data/` 폴더에 저장됩니다.
+- **📝 로컬 퍼스트 (Local-First)**: 모든 데이터(문서, 주석, AI 대화)는 내 컴퓨터의 프로젝트 폴더(`paper-reader-data/`)에 저장됩니다. (Dev Server Mode)
+- **🤖 멀티 AI 모델 지원**: DeepSeek, Gemini, OpenAI 등 다양한 모델을 **용도에 맞게 섞어서** 사용할 수 있습니다. (예: 설명은 Gemini Flash, 비판은 DeepSeek R1)
+- **🔍 강력한 파서**: HTML/Markdown 논문의 구조를 자동으로 분석하여 목차(TOC)와 문단 단위의 인터랙션을 제공합니다. 수식(MathJax/MathML)도 완벽하게 지원합니다.
+- **💬 연구 에이전트**: 단순 챗봇이 아닌, 현재 읽고 있는 문단(Context)을 이해하고 토론하는 파트너입니다.
+- **⚡ 가볍고 빠름**: 무거운 설치 과정 없이, `start_browser.bat` 파일 하나로 즉시 실행됩니다.
 
-### 폴더 구조
-```text
-peer-reviewer/
-  ├── paper-reader-data/      # 자동 생성됨 (여기에 모든 데이터 저장)
-  │   ├── cache/              # AI 응답 등 캐시 (삭제 가능)
-  │   ├── annotations/        # 문서 주석 데이터
-  │   └── images/             # 붙여넣은 이미지
-  ├── src/
-  ...
-```
+## 🚀 실행 방법 (Getting Started)
 
-### 배포 시 주의사항 (Production)
-이 기능은 `vite` 개발 서버에 의존하므로, 정적 호스팅(GitHub Pages 등)으로 배포할 경우 자동으로 비활성화되며 **기존 방식(브라우저 파일 시스템 API + 폴더 수동 선택)**으로 폴백됩니다.
+### 사전 요구사항
+- **Node.js**: (v18 이상 권장) 컴퓨터에 설치되어 있어야 합니다.
 
-## 주요 기능
+### 설치 및 실행
+1. 프로젝트 폴더를 엽니다.
+2. 처음이라면 의존성을 설치합니다:
+   ```bash
+   npm install
+   ```
+   (이미 `node_modules`가 있다면 생략 가능)
+3. **원클릭 실행**:
+   - `start_browser.bat` 파일을 더블 클릭하세요.
+   - 까만 터미널 창(서버)이 열리고, 잠시 후 웹 브라우저가 자동으로 실행됩니다.
 
+## 📖 문서 (Documentation)
 
-### 📖 읽기 환경
-- **몰입형 리더 UI**: 깔끔한 3단 구성 (라이브러리 + 본문 + 인사이트 패널)
-- **정교한 HTML 파싱**: 번역 도구(Immersive Translate 등) 출력물을 완벽 파싱
-  - `sup`, `sub`, 수식(KaTeX/LaTeX), 표, 인용구 등 구조 보존
-  - 50%, 88% 같은 숫자 분리 방지 (Phase 26)
-  - 헤더 인식 및 계층 구조(TOC) 자동 생성
-  - 그림(Figure) 및 캡션 자동 추출 및 내비게이션
-- **세션 복원**: 마지막 읽던 문서 + 스크롤 위치 자동 복원
-- **읽기 진행률**: 실시간 진행률 추적 및 라이브러리 반영
-- **가상 파일 시스템**: 업로드한 HTML을 localStorage에 압축 저장
+- **사용자 가이드**: `help.md` - 프로그램 사용법과 단축키 등을 설명합니다.
+- **개발자 가이드**: `dev.md` - 프로젝트 구조와 아키텍처, 작동 원리를 설명합니다.
 
-### 🎨 주석 및 하이라이트
-- **인라인 하이라이트**: 색상별 배경 렌더링 (노랑/초록/파랑/핑크/오렌지)
-- **AI Insight**: 보라색 밑줄 + 마우스 오버 툴팁으로 AI 설명 표시
-- **주석 타입**: Highlight / AI Insight / Note / Discussion
-- **자동 저장**: 설정 가능한 주기(기본 30초)마다 localStorage 저장
-- **주석 내비게이션**: Alt+↓/↑ 단축키로 하이라이트 간 이동
+## 🛠 기술 스택
 
-### 🤖 AI 기능 (Advanced)
-- **Multi-LLM Support**: Google Gemini (Pro/Flash), DeepSeek, OpenAI 등 다중 모델 지원
-- **Smart Routing**: 작업의 복잡도와 문맥에 따라 최적의 AI 모델을 자동 라우팅 (비용 절감 및 효율성 증대)
-- **Context-Aware Suggestions**: 논문 전체 내용을 분석하여 해당 논문의 핵심을 찌르는 맞춤형 질문 세트 자동 생성
-- **Persistence (지속성)**: 생성된 AI 요약, 추천 질문, 채팅 내역을 각 논문별로 자동 저장하여 재방문 시 즉시 로드
-- **One-Click Regenerate**: 저장된 AI 분석 결과가 만족스럽지 않을 경우 원클릭으로 재생성
-- **AI 설명**: 선택한 구절을 전문적으로 해설 (한국어)
-- **AI 요약**: 논문의 핵심 기여와 방법론을 1-2문장으로 압축
-- **Research Agent**: Multi-agent 오케스트레이션
-  - 분석/검색/저자 시뮬레이션/비평/가설 생성
-  - 사고 과정 시각화 + 마크다운 결과
-- **AI Repair**: 깨진 텍스트 자동 복구 ("5 0 %" → "50%")
-- **AI Align**: EN/KO 문장 정렬 자동 보정
+- **Frontend**: React, TypeScript, TailwindCSS
+- **Storage**: Custom Vite Middleware (Local FS Access)
+- **AI Integration**: Client-side API Calls (No Backend Proxy needed)
 
-### 🔧 번역 및 언어
-- **EN/KO 토글**: 문서 전체 또는 문단 단위 번역 전환
-- **Ctrl+Hover**: 한국어 모드에서 영어 미리보기
-- **언어 우선순위**: 설정에서 기본 언어 지정
+## 📄 라이선스
 
-### ⚙️ 설정 및 커스터마이징
-- **다중 AI 제공자**: OpenAI / Gemini / DeepSeek
-- **기능별 모델 할당**: 설명/요약/토론/수식/표 각각 다른 모델 지정 가능
-- **커스텀 단축키**: 모든 액션에 단축키 할당 + 중복 검증
-- **하이라이트 팔레트**: 사용자 정의 색상 설정
-- **자동 저장 주기**: 초 단위로 조절 가능
-
-### 📚 라이브러리 관리
-- **파일 업로드**: HTML 문서를 가상 파일 시스템에 저장
-- **메타데이터**: 제목/저자/생성일/읽기 진행률 자동 추출
-- **검색 및 필터**: 제목/내용 검색 + 정렬
-- **최근 문서**: 마지막 읽은 순서대로 정렬
-
-### 📤 내보내기
-- **Obsidian 마크다운**: 하이라이트 + 주석 포함 내보내기
-- **BibTeX 메타데이터**: 인용 정보 자동 생성
-
-## 기술 스택
-- React 19 + TypeScript
-- Vite + Tailwind CSS
-- framer-motion / sonner / react-markdown / katex
-- localStorage for data persistence
-
-## 설치 및 실행
-1) 의존성 설치
-```bash
-npm install
-```
-
-2) 개발 모드 실행
-```bash
-npm run dev
-```
-
-브라우저에서 http://localhost:5173 접속
-
-## 빌드
-```bash
-npm run build
-```
-
-빌드된 파일은 `dist/` 폴더에 생성됩니다.
-
-Node 24 환경에서 Vite가 비정상 종료되면:
-```bash
-npm run build:stable
-```
-
-## 사용 방법
-1) 좌측 상단 `+` 버튼으로 HTML 논문 열기 (또는 샘플 문서 사용)
-2) 본문에서 텍스트 선택 → 툴바로 하이라이트/노트/AI 설명/AI 요약 실행
-3) 우측 Research Agent에서 문서 전체 질문/분석
-4) 상단 Export 버튼으로 Obsidian 마크다운 내보내기
-5) Settings(⚙️)에서 API 키/모델/단축키/리더 설정
-
-## AI 기능 사용 전 설정
-1. Settings(⚙️) → API Keys 탭
-2. 사용할 AI 제공자의 API 키 입력 (OpenAI / Gemini / DeepSeek)
-3. Models 탭에서 기능별 모델 선택
-   - Explain: AI 설명 생성 모델
-   - Summarize: AI 요약 생성 모델
-   - Discussion: Research Agent 모델
-4. 저장 후 텍스트 선택 → AI 기능 사용 가능
-
-## 데이터 저장 (Dual Strategy)
-- **로컬 폴더 모드 (권장)**
-  - 사용자가 선택한 폴더에 파일 직접 저장
-  - 구조:
-    - `/SelectedFolder/`
-      - `*.html` (논문 파일)
-      - `paper-reader-data/`
-        - `settings.json` (설정)
-        - `annotations/` (문서별 주석)
-  - 장점: 브라우저 청소에도 데이터 유지, 파일 백업 용이
-
-- **브라우저 모드 (기본)**
-  - `localStorage` 및 `IndexedDB` 사용
-  - 설치 없이 즉시 사용 가능하나, 데이터 영구 보존에 취약
-
-    core/              # 파서, 저장, AI 클라이언트 등 핵심 로직
-    hooks/             # 단축키 등 커스텀 훅
-    types/             # TypeScript 타입 정의
-  public/              # 정적 파일 및 샘플 문서
-```
-
-## 기능 요약
-✅ **파싱 & 렌더링**
-- HTML 번역 논문 파싱 (Immersive Translate 등)
-- EN/KO 문장 단위 정렬 및 토글
-- 수식(KaTeX), 인용, 내부 링크 지원
-- 50%, 88% 같은 숫자 분리 방지 (Phase 26)
-
-✅ **AI 기능**
-- 선택 텍스트 AI 설명/요약 (인라인 저장)
-- Auto-Highlight: 핵심 문장 자동 감지
-- Research Agent: Multi-agent 분석/토론 (Chat 모드 추가)
-- Smart Routing: 모델 최적화 (GPT-4o / DeepSeek / Gemini)
-
-✅ **주석 시스템**
-- Highlight (색상 배경)
-- AI Insight (보라색 밑줄 + 툴팁)
-- Definition/Note (파란색 배지)
-- Discussion (초록색 배지)
-- 모든 주석 로컬 파일(JSON) 자동 저장
-
-✅ **라이브러리 관리**
-- 로컬 폴더 연동 (FileSystem Access API)
-- 파일 업로드 필요 없음 (폴더 내 파일 자동 감지)
-- 읽기 진행률 추적
-- 마지막 읽은 위치 복원
-- 검색 및 정렬
-
-✅ **내보내기**
-- Obsidian 마크다운 형식
-- 하이라이트 + 주석 포함
-- BibTeX 메타데이터
-
-## 주의사항
-- **지원 브라우저**: 로컬 폴더 기능은 Chrome, Edge 등 Chromium 기반 브라우저(PC)에서 최적으로 작동합니다.
-- **이미지 처리**: HTML 내 이미지는 자동으로 추출되어 로컬 폴더의 `images/` 하위 폴더에 저장됩니다. (로컬 폴더 모드 사용 시)
-- **API 키 관리**: 사용자의 API 키는 오직 사용자의 로컬 환경(settings.json)에만 저장되며 외부로 전송되지 않습니다.
-
-## 라이선스
-- 개인/연구용으로 사용 가능. 상업적 사용은 별도 문의.
+MIT License

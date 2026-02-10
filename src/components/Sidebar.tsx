@@ -1,9 +1,19 @@
-import * as React from 'react';
-import { Library as LibraryIcon, Sparkles, X, List, Image as ImageIcon } from 'lucide-react';
+import { 
+  Library as LibraryIcon, 
+  Sparkles, 
+  X, 
+  List, 
+  Image as ImageIcon, 
+  Highlighter, 
+  BookMarked,
+  StickyNote
+} from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExplorerPanel } from './ExplorerPanel';
 import { ResearchAgentPanel } from './ResearchAgentPanel';
+import { NotebookPanel } from './NotebookPanel';
+import { AnnotationsPanel } from './AnnotationsPanel';
 import { type LibraryItem } from '../core/LibraryManager';
 import { type AppSettings } from '../types/settings';
 import { type Annotation, type PaperStructure } from '../types/ReaderTypes';
@@ -13,8 +23,8 @@ import { LocalStorageManager } from '../core/LocalStorageManager';
 interface SidebarProps {
   side?: 'left' | 'right';
   isOpen: boolean;
-  activeTab: 'library' | 'agent' | 'toc';
-  onTabChange: (tab: 'library' | 'agent' | 'toc') => void;
+  activeTab: 'library' | 'agent' | 'toc' | 'notebook' | 'highlights';
+  onTabChange: (tab: 'library' | 'agent' | 'toc' | 'notebook' | 'highlights') => void;
   onClose: () => void;
   library: LibraryItem[];
   activeFileId: string | null;
@@ -28,6 +38,8 @@ interface SidebarProps {
   structure?: PaperStructure;
   initialAgentQuery?: string;
   storageManager?: LocalStorageManager;
+  onDeleteAnnotation?: (id: string) => void;
+  onSaveNote?: (note: Annotation) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -47,12 +59,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   structure,
   onOpenSettings,
   initialAgentQuery,
-  storageManager
+  storageManager,
+  onDeleteAnnotation,
+  onSaveNote
 }) => {
   const tabs = [
-    { id: 'library' as const, icon: LibraryIcon, label: '라이브러리', shortcut: 'Alt+L', side: 'left' },
-    { id: 'toc' as const, icon: List, label: '목차', shortcut: 'Alt+O', side: 'left' },
-    { id: 'agent' as const, icon: Sparkles, label: 'AI 에이전트', shortcut: 'Alt+I', side: 'right' },
+    { id: 'library' as const, icon: LibraryIcon, label: '서재', shortcut: 'Alt+1', side: 'left' },
+    { id: 'toc' as const, icon: List, label: '목차', shortcut: 'Alt+2', side: 'left' },
+    { id: 'highlights' as const, icon: Highlighter, label: '하이라이트', shortcut: 'Alt+3', side: 'left' },
+    { id: 'agent' as const, icon: Sparkles, label: '연구 에이전트', shortcut: 'Alt+4', side: 'right' },
+    { id: 'notebook' as const, icon: StickyNote, label: '노트북', shortcut: 'Alt+5', side: 'right' },
   ];
 
   const filteredTabs = tabs.filter(t => t.side === side);
@@ -89,28 +105,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   key={tab.id}
                   onClick={() => onTabChange(tab.id)}
                   className={clsx(
-                    "p-3 rounded-2xl transition-all relative group",
+                    "p-3 rounded-2xl transition-all relative group hover:bg-[color:var(--bg-hover)]",
                     isActive ? "text-blue-500 bg-blue-500/10 shadow-inner" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300"
                   )}
                 >
-                  <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                  <div className={clsx("relative", isActive && "drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]")}>
+                    <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                  </div>
+
                   {isActive && (
                     <motion.div 
                       layoutId={`activeTabIndicator-${side}`}
                       className={clsx(
                         "absolute top-1/2 -translate-y-1/2 w-[3px] h-8 bg-blue-500 rounded-px shadow-[0_0_10px_rgba(59,130,246,0.5)]",
-                        side === 'left' ? "-left-px rounded-r-full" : "-right-px rounded-l-full"
+                        side === 'left' ? "-left-[13px] rounded-r-full" : "-right-[13px] rounded-l-full"
                       )}
                     />
                   )}
                   
                   {/* Tooltip */}
                   <div className={clsx(
-                    "absolute top-1/2 -translate-y-1/2 px-2 py-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded text-[11px] whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-xl",
+                    "absolute top-1/2 -translate-y-1/2 px-3 py-2 bg-zinc-900/90 dark:bg-zinc-100/90 backdrop-blur-md border border-white/10 dark:border-black/5 rounded-lg text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50 shadow-xl translate-x-2 group-hover:translate-x-0",
                     side === 'left' ? "left-full ml-4" : "right-full mr-4"
                   )}>
-                    <span className="font-medium text-zinc-900 dark:text-zinc-100">{tab.label}</span>
-                    <span className="ml-2 text-zinc-500 dark:text-zinc-500">{tab.shortcut}</span>
+                    <span className="font-bold text-zinc-100 dark:text-zinc-900">{tab.label}</span>
+                    <div className="mt-1 flex items-center gap-1 opacity-70">
+                       <span className="font-mono text-[10px] bg-white/20 dark:bg-black/10 px-1 rounded">{tab.shortcut}</span>
+                    </div>
                   </div>
                 </button>
               );
@@ -205,6 +226,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
 
+                {activeTab === 'highlights' && side === 'left' && (
+                  <div className="h-full flex flex-col">
+                    <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 flex items-center justify-between">
+                      <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Highlights</h2>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <AnnotationsPanel 
+                        annotations={annotations} 
+                        onDelete={onDeleteAnnotation || (() => {})} 
+                        onJump={scrollToParagraph}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {activeTab === 'agent' && side === 'right' && (
                   <div className="h-full flex flex-col">
                     <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 flex items-center justify-between">
@@ -220,8 +256,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           initialQuery={initialAgentQuery}
                           storageManager={storageManager}
                           fileId={activeFileId || undefined}
+                          onSaveNote={onSaveNote}
                         />
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'notebook' && side === 'right' && (
+                  <div className="h-full flex flex-col">
+                    <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 flex items-center justify-between">
+                      <h2 className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Notebook</h2>
+                    </div>
+                    <div className="flex-1 overflow-hidden">
+                      <NotebookPanel 
+                        annotations={annotations} 
+                        onDelete={onDeleteAnnotation || (() => {})} 
+                        onJump={scrollToParagraph}
+                      />
                     </div>
                   </div>
                 )}

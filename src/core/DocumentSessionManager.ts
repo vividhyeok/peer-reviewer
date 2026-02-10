@@ -145,3 +145,14 @@ export class DocumentSession {
         return (hash >>> 0).toString(16);
     }
 }
+
+export class DocumentSessionManager {
+    private static sessions: Map<string, DocumentSession> = new Map();
+
+    static getSession(id: string, storage: LocalStorageManager): DocumentSession {
+        if (!this.sessions.has(id)) {
+            this.sessions.set(id, new DocumentSession(id, storage));
+        }
+        return this.sessions.get(id)!;
+    }
+}

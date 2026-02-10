@@ -1,4 +1,4 @@
-export type AnnotationType = 'definition' | 'discussion' | 'comment' | 'highlight' | 'insight' | 'question' | 'note';
+export type AnnotationType = 'definition' | 'discussion' | 'comment' | 'highlight' | 'insight' | 'question' | 'note' | 'ai_response';
 
 export interface AnnotationTarget {
     paragraphId: string;
@@ -15,6 +15,15 @@ export interface Annotation {
     target: AnnotationTarget;
     color?: string;
     createdAt: number;
+}
+
+export interface AIMessage {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    context?: {
+        paragraphId: string;
+        textSnippet?: string;
+    };
 }
 
 export interface AlignedSentence {

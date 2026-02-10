@@ -13,12 +13,13 @@ import { MultiAIClient } from './core/MultiAIClient';
 import { type Annotation, type PaperStructure } from './types/ReaderTypes';
 import { LocalStorageManager } from './core/LocalStorageManager';
 import { AnnotationManager } from './core/AnnotationManager';
+import { useUndoableState } from './hooks/useUndoableState';
 
 function App() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
-  const [leftSidebarTab, setLeftSidebarTab] = useState<'library'>('library');
-  const [rightSidebarTab, setRightSidebarTab] = useState<'agent'>('agent');
+  const [leftSidebarTab, setLeftSidebarTab] = useState<'library' | 'toc' | 'highlights'>('library');
+  const [rightSidebarTab, setRightSidebarTab] = useState<'agent' | 'notebook'>('agent');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(() => SettingsManager.load());
@@ -26,7 +27,14 @@ function App() {
   const [activeFileId, setActiveFileId] = useState<string | null>(() => localStorage.getItem('active_file_id'));
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [currentDocText, setCurrentDocText] = useState<string>('');
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const { 
+    state: annotations, 
+    setState: setAnnotations, 
+    undo: undoAnnotations, 
+    redo: redoAnnotations, 
+    canUndo, 
+    canRedo 
+  } = useUndoableState<Annotation[]>([]);
   const [docStructure, setDocStructure] = useState<PaperStructure | undefined>(undefined);
   const [initialAgentQuery, setInitialAgentQuery] = useState<string | undefined>(undefined);
   
@@ -49,6 +57,16 @@ function App() {
     } else {
       setLibrary(items);
     }
+  }, []);
+
+  const handleSaveNote = useCallback((note: Annotation) => {
+    setAnnotations(prev => [...prev, note]);
+    toast.success('Saved to Notebook', { icon: <BookOpen size={16} /> });
+  }, []);
+
+  const handleDeleteAnnotation = useCallback((id: string) => {
+    setAnnotations(prev => prev.filter(a => a.id !== id));
+    toast.success('Deleted', { icon: <Search size={16} /> });
   }, []);
 
   useEffect(() => {
@@ -210,7 +228,9 @@ function App() {
     // @ts-ignore
     window.addEventListener('toolbar-action', handleAction);
 
-    const handleOpenAgent = () => {
+    const handleOpenAgent = (e: any) => {
+      const { prompt } = e.detail || {};
+      if (prompt) setInitialAgentQuery(prompt);
       setRightSidebarOpen(true);
       setRightSidebarTab('agent');
     };
@@ -387,6 +407,10 @@ function App() {
       <TopToolbar 
         settings={settings}
         onSaveSettings={handleSaveSettings}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undoAnnotations}
+        onRedo={redoAnnotations}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -413,6 +437,8 @@ function App() {
           settings={settings}
           onOpenSettings={() => setSettingsOpen(true)}
           structure={docStructure}
+          annotations={annotations}
+          onDeleteAnnotation={handleDeleteAnnotation}
         />
 
         <div className="flex-1 relative z-0">
@@ -446,6 +472,8 @@ function App() {
           onOpenSettings={() => setSettingsOpen(true)}
           initialAgentQuery={initialAgentQuery}
           storageManager={storageManagerRef.current}
+          onSaveNote={handleSaveNote}
+          onDeleteAnnotation={handleDeleteAnnotation}
         />
       </div>
 

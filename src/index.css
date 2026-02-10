@@ -71,12 +71,19 @@ body {
   font-family: var(--font-sans);
 }
 
+::selection {
+  background-color: rgba(59, 130, 246, 0.3); /* Distinct selection color */
+  color: inherit;
+}
+
 .reader-content {
   max-width: var(--reader-max-width);
   margin: 0 auto;
   padding: 120px 48px;
-  font-size: 16.5px;
+  font-size: 17.5px; /* Increased legibility */
   font-family: var(--font-serif);
+  text-align: justify; /* Paper-like layout */
+  hyphens: auto;       /* Better spacing */
 }
 
 /* Subtle Header Styles */

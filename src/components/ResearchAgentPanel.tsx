@@ -19,6 +19,7 @@ interface ResearchAgentPanelProps {
     initialQuery?: string;
     storageManager: LocalStorageManager;
     fileId?: string;
+    onSaveNote?: (note: Annotation) => void;
 }
 
 // Utility for hashing
@@ -32,7 +33,7 @@ function simpleHash(str: string) {
     return Math.abs(hash).toString(16);
 }
 
-export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings, documentFullText, onOpenSettings, annotations, initialQuery, storageManager, fileId }) => {
+export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings, documentFullText, onOpenSettings, annotations, initialQuery, storageManager, fileId, onSaveNote }) => {
     const [messages, setMessages] = useState<AIMessage[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -220,7 +221,14 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         if (!input.trim() || !documentFullText || loading) return;
 
         const userQuery = input.trim();
-        const userMsg: AIMessage = { role: 'user', content: userQuery };
+        const userMsg: AIMessage = { 
+            role: 'user', 
+            content: userQuery,
+            context: activeContext ? {
+                paragraphId: activeContext.paragraphId,
+                textSnippet: activeContext.text
+            } : undefined
+        };
         
         // Optimistic update
         setMessages(prev => [...prev, userMsg]);
@@ -256,7 +264,13 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                 messages // Pass current history (excluding the new userMsg which is passed as query)
             );
 
-            setMessages(prev => [...prev, { role: 'assistant', content: finalAnswer }]);
+            setMessages(prev => [...prev, { 
+                role: 'assistant', 
+                content: finalAnswer,
+                context: activeContext ? {
+                    paragraphId: activeContext.paragraphId
+                } : undefined
+            }]);
         } catch (e) {
             console.error(e);
             toast.error("Agent execution failed");
@@ -445,6 +459,53 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                                 >
                                                     {m.content}
                                                 </ReactMarkdown>
+
+                                                
+                                                {m.role === 'assistant' && (
+                                                    <div className="flex items-center gap-2 mt-4 pt-4 border-t border-zinc-200/50 dark:border-zinc-700/50">
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (onSaveNote && activeContext) {
+                                                                    onSaveNote({
+                                                                        id: crypto.randomUUID(),
+                                                                        type: 'ai_response',
+                                                                        content: m.content,
+                                                                        createdAt: Date.now(),
+                                                                        target: {
+                                                                            paragraphId: m.context?.paragraphId || activeContext.paragraphId,
+                                                                            textHash: 'ai',
+                                                                            startOffset: 0, 
+                                                                            endOffset: 0,
+                                                                            selectedText: m.context?.textSnippet || activeContext.text
+                                                                        }
+                                                                    });
+                                                                    toast.success("Saved to Notebook");
+                                                                } else {
+                                                                    toast.error("Set context first by selecting text");
+                                                                }
+                                                            }}
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                                                            title="Save to Notebook with Context"
+                                                        >
+                                                            <BookOpen size={12} />
+                                                            SAVE NOTE
+                                                        </button>
+                                                        
+                                                        {m.context?.paragraphId && (
+                                                            <button 
+                                                                onClick={() => {
+                                                                    const el = document.getElementById(`para-${m.context?.paragraphId}`);
+                                                                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                }}
+                                                                className="flex items-center gap-1.5 px-3 py-1.5 text-zinc-500 dark:text-zinc-400 text-[10px] font-bold rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                            >
+                                                                <Layers size={12} />
+                                                                JUMP TO SOURCE
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </motion.div>

@@ -3,8 +3,11 @@ import { MultiAIClient } from './MultiAIClient';
 import { type AIProvider } from '../types/settings';
 
 export interface ExportOptions {
-    type: 'insight-driven' | 'quick-scan';
+    type: 'insight-driven' | 'quick-scan' | 'obsidian-structured' | 'raw-dump' | 'custom-prompt';
     format: 'markdown';
+    scope?: 'all' | 'highlights-only' | 'until-bookmark';
+    bookmarkId?: string;
+    customPrompt?: string;
 }
 
 export class SmartExporter {
@@ -15,11 +18,122 @@ export class SmartExporter {
         annotations: Annotation[],
         options: ExportOptions
     ): Promise<string> {
-        if (options.type === 'quick-scan') {
-            return this.generateQuickScan(aiClient, modelInfo, paragraphs);
-        } else {
-            return this.generateInsightDriven(aiClient, modelInfo, paragraphs, annotations);
+        // 1. Filter Content based on Scope
+        let targetParagraphs = paragraphs;
+        
+        if (options.scope === 'until-bookmark' && options.bookmarkId) {
+            const index = paragraphs.findIndex(p => p.id === options.bookmarkId);
+            if (index !== -1) {
+                targetParagraphs = paragraphs.slice(0, index + 1);
+            }
+        } else if (options.scope === 'highlights-only') {
+            const highlightedIds = new Set(annotations.map(a => a.target.paragraphId));
+            targetParagraphs = paragraphs.filter(p => highlightedIds.has(p.id));
         }
+
+        // 2. Route to Generator
+        if (options.type === 'raw-dump') {
+            return this.generateRawDump(targetParagraphs, annotations);
+        } else if (options.type === 'quick-scan') {
+            return this.generateQuickScan(aiClient, modelInfo, targetParagraphs);
+        } else if (options.type === 'obsidian-structured') {
+            return this.generateObsidianNote(aiClient, modelInfo, targetParagraphs, annotations);
+        } else if (options.type === 'custom-prompt') {
+            return this.generateCustomPrompt(aiClient, modelInfo, targetParagraphs, annotations, options.customPrompt || '');
+        } else {
+            return this.generateInsightDriven(aiClient, modelInfo, targetParagraphs, annotations);
+        }
+    }
+
+    private static generateRawDump(paragraphs: ParagraphData[], annotations: Annotation[]): string {
+        const today = new Date().toISOString().split('T')[0];
+        let md = `---\ntags: [paper-review, raw-export]\ndate: ${today}\n---\n\n# Raw Highlights & Notes\n\n`;
+
+        paragraphs.forEach(p => {
+            const pNotes = annotations.filter(a => a.target.paragraphId === p.id);
+            if (pNotes.length === 0) return;
+
+            md += `### Paragraph ${p.index} (ID: ${p.id})\n\n`;
+            
+            // Render Highlights as Quotes
+            pNotes.filter(a => a.type === 'highlight' || a.type === 'note').forEach(a => {
+                if (a.target.selectedText) {
+                    md += `> ${a.target.selectedText}\n`;
+                }
+                if (a.content) {
+                    md += `- **Note**: ${a.content}\n`;
+                }
+                md += `\n`;
+            });
+            
+            // Render other types
+            pNotes.filter(a => !['highlight', 'note'].includes(a.type)).forEach(a => {
+                md += `- **[${a.type.toUpperCase()}]**: ${a.content}\n`;
+                if(a.target.selectedText) md += `  (Context: "${a.target.selectedText.slice(0, 50)}...")\n`;
+            });
+            md += `\n---\n\n`;
+        });
+        return md;
+    }
+
+    private static async generateObsidianNote(
+        aiClient: MultiAIClient,
+        modelInfo: { provider: AIProvider; modelId: string },
+        paragraphs: ParagraphData[],
+        annotations: Annotation[]
+    ): Promise<string> {
+        // Collect crucial data
+        const summaryContext = paragraphs.map(p => p.enText.replace(/<[^>]+>/g, '')).join('\n').slice(0, 8000);
+        const userNotes = annotations.map(a => `- [${a.type}] Content: ${a.content} (on item: ${a.target.selectedText.slice(0,30)}...)`).join('\n');
+
+        const prompt = `Create a high-quality Obsidian Markdown note for this research paper.
+        
+        Rules:
+        1. Use **Frontmatter** for metadata (status: #reading, type: #paper).
+        2. Use **Callouts** (e.g., > [!ABSTRACT], > [!IMPORTANT]) to structure the content.
+        3. Create a **"Core Concepts"** section defining key terms found in text.
+        4. Create a **"My Insights"** section that synthesizes the User Notes provided below.
+        5. Add a **"Actionable Takeaways"** section.
+        6. Keep it clean and structured.
+
+        User Notes:
+        ${userNotes}
+
+        Paper Text (Excerpt):
+        ${summaryContext}
+        
+        Response Language: Korean (but keep technical terms in English where appropriate).`;
+
+        const response = await aiClient.sendMessage(modelInfo.provider, modelInfo.modelId, [
+            { role: 'user', content: prompt }
+        ]);
+
+        return response.content;
+    }
+
+    private static async generateCustomPrompt(
+        aiClient: MultiAIClient,
+        modelInfo: { provider: AIProvider; modelId: string },
+        paragraphs: ParagraphData[],
+        annotations: Annotation[],
+        customPrompt: string
+    ): Promise<string> {
+        const textContext = paragraphs.map(p => p.enText.replace(/<[^>]+>/g, '')).join('\n').slice(0, 10000);
+        const noteContext = annotations.map(a => `[${a.type}] ${a.content}`).join('\n');
+
+        const fullPrompt = `${customPrompt}
+        
+        Reference Materials:
+        - Paper Content (Truncated): ${textContext}
+        - User Notes: ${noteContext}
+        
+        Answer in Korean unless specified otherwise.`;
+
+        const response = await aiClient.sendMessage(modelInfo.provider, modelInfo.modelId, [
+            { role: 'user', content: fullPrompt }
+        ]);
+
+        return response.content;
     }
 
     private static async generateQuickScan(

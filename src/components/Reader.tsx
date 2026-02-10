@@ -11,11 +11,13 @@ import { MultiAIClient } from '../core/MultiAIClient';
 import { type Annotation, type SelectionState, type ParagraphData, type PaperStructure } from '../types/ReaderTypes';
 import { type AppSettings, AI_MODELS } from '../types/settings';
 import { LibraryManager, type LibraryItem } from '../core/LibraryManager';
-import { Search, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { Search, ChevronDown, ChevronUp, Download, BookOpen, Library as LibraryManagerIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { SmartExportModal } from './SmartExportModal';
 import { LocalStorageManager } from '../core/LocalStorageManager';
 import { WelcomeScreen } from './WelcomeScreen';
+import { AnnotationsPanel } from './AnnotationsPanel';
+import { NotebookPanel } from './NotebookPanel';
 import { useDocumentLoader } from '../hooks/useDocumentLoader';
 // import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
@@ -130,7 +132,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
           const library = LibraryManager.getLibrary();
           const updated = library.map(item => item.id === activeFile.id ? { ...item, bookmarkParagraphId: next } : item);
           localStorage.setItem('paper-reader-library', JSON.stringify(updated));
-          if (next) toast.success("Bookmark set");
+          if (next) toast.success("북마크가 설정되었습니다");
       }
   };
 
@@ -142,7 +144,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
               el.classList.add('ring-4', 'ring-red-500/50');
               setTimeout(() => el.classList.remove('ring-4', 'ring-red-500/50'), 2000);
           } else {
-              toast.error("Bookmark location not found in loaded text");
+              toast.error("북마크된 위치를 찾을 수 없습니다");
           }
       }
   };
@@ -162,8 +164,20 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         }
       };
       onAnnotationsChange([...annotations, newAnnotation]);
-      toast.success("Note added");
+      toast.success("노트가 추가되었습니다");
   };
+
+  // Improved floating toolbar trigger logic
+  // Removed redundant useEffect to avoid double binding and conflict with handleMouseUp prop
+/*
+  useEffect(() => {
+    const handleMouseUp = () => {
+       // ... existing code ...
+    };
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => document.removeEventListener('mouseup', handleMouseUp);
+  }, [paragraphs]);
+*/
 
   const processAnnotation = useCallback(async (type: Annotation['type'], content: string, color?: string, selectionOverride?: SelectionState) => {
     const selection = selectionOverride || currentSelection;
@@ -362,29 +376,41 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
   }, [paragraphs]);
 
   const handleMouseUp = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-      setToolbarVisible(false);
-      return;
-    }
+    // 150ms debounce to prevent accidental triggers (e.g. while scrolling or clicking)
+    setTimeout(() => {
+        const selection = window.getSelection();
+        
+        // Strict validation: Must be non-empty and at least 5 chars long to show toolbar
+        if (!selection || selection.isCollapsed || selection.toString().trim().length < 5) {
+          setToolbarVisible(false);
+          return;
+        }
 
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    const pEl = getParagraphElement(selection.anchorNode!);
-    if (!pEl) return;
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        // Ensure valid visual selection
+        if (rect.width === 0 || rect.height === 0) {
+            setToolbarVisible(false);
+            return;
+        }
 
-    const paragraphId = pEl.id.replace('para-', '');
-    const text = selection.toString().trim();
-    const offset = computeOffsetInParagraph(pEl, selection.anchorNode!, selection.anchorOffset);
+        const pEl = getParagraphElement(selection.anchorNode!);
+        if (!pEl) return;
 
-    setCurrentSelection({
-      paragraphId,
-      text,
-      range: { start: offset, end: offset + text.length }
-    });
+        const paragraphId = pEl.id.replace('para-', '');
+        const text = selection.toString().trim();
+        const offset = computeOffsetInParagraph(pEl, selection.anchorNode!, selection.anchorOffset);
 
-    setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
-    setToolbarVisible(true);
+        setCurrentSelection({
+          paragraphId,
+          text,
+          range: { start: offset, end: offset + text.length }
+        });
+
+        setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
+        setToolbarVisible(true);
+    }, 150);
   }, []);
 
   const handleAIAlign = useCallback(async (paragraphId: string) => {
@@ -495,7 +521,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     const model = provider === 'deepseek' ? 'deepseek-chat' : (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
 
     if (!settings.apiKeys[provider]) {
-        toast.error("AI API Key not configured.");
+        toast.error("AI API 키 설정을 먼저 해주세요.");
         return;
     }
 
@@ -509,9 +535,9 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     })();
 
     toast.promise(promise, {
-         loading: 'Generating definition...',
-         success: 'Definition added',
-         error: 'Failed to generate definition'
+         loading: '단어 정의 생성 중...',
+         success: '정의가 추가되었습니다',
+         error: '생성 실패'
     });
   };
 
@@ -520,15 +546,15 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     const selection = currentSelection; // Capture selection
 
     setModalConfig({
-        title: 'Ask about this text',
-        description: `Selected: "${selection.text.slice(0, 30)}..."`,
+        title: '선택한 내용에 대해 질문하기',
+        description: `선택됨: "${selection.text.slice(0, 30)}..."`,
         onConfirm: async (question) => {
              if (!aiClientRef.current) return;
              const provider = settings.apiKeys.deepseek ? 'deepseek' : (settings.apiKeys.gemini ? 'gemini' : 'openai');
              const model = provider === 'deepseek' ? 'deepseek-chat' : (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
             
              if (!settings.apiKeys[provider]) {
-                toast.error("Please configure an AI API key first.");
+                toast.error("AI API 키 설정을 먼저 해주세요.");
                 return;
             }
 
@@ -543,9 +569,9 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
              })();
              
               toast.promise(promise, {
-                 loading: 'Asking AI...',
-                 success: 'Answer received',
-                 error: 'Failed to get answer'
+                 loading: 'AI에게 질문하는 중...',
+                 success: '답변 완료',
+                 error: '답변 받기 실패'
             });
         }
     });
@@ -554,7 +580,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
 
   const handleAIAction = async (type: string) => {
     if (!currentSelection && type !== 'summarize' && type !== 'critique') {
-      toast.error("Please select some text first");
+      toast.error("먼저 텍스트를 선택해주세요");
       return;
     }
 
@@ -595,21 +621,28 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
 
   if (!activeFile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-500 animate-in fade-in duration-700 bg-white dark:bg-zinc-950">
-        <div className="text-center p-10 flex flex-col items-center">
-          <div className="relative mb-8 w-24 h-24 flex items-center justify-center">
-            <div className="absolute inset-0 bg-blue-500/10 rounded-full animate-pulse" />
-            <Search size={48} strokeWidth={1} className="text-blue-500 relative z-10" />
+      <div className="flex flex-col items-center justify-center h-full text-zinc-500 animate-in fade-in duration-700 bg-zinc-50/50 dark:bg-zinc-950/50">
+        <div className="text-center p-12 flex flex-col items-center max-w-lg bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800">
+          <div className="relative mb-6 w-20 h-20 flex items-center justify-center">
+            <div className="absolute inset-0 bg-blue-500/10 rounded-full animate-ping opacity-20" />
+            <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-blue-500 to-violet-500 flex items-center justify-center text-white shadow-lg rotate-3 group hover:rotate-6 transition-transform duration-500">
+              <BookOpen size={40} strokeWidth={1.5} />
+            </div>
           </div>
-          <h3 className="text-3xl font-serif text-zinc-900 dark:text-white mb-4 tracking-tight">Ready to Read</h3>
-          <p className="text-base text-zinc-600 dark:text-zinc-400 max-w-sm mx-auto leading-relaxed mb-8">
-            Select a document from your library to enter the immersive reading space.
+          <h3 className="text-2xl font-serif text-zinc-900 dark:text-white mb-3 tracking-tight">Begin Research Session</h3>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed mb-8 px-8">
+            Select a document to enter the immersive reading environment. 
+            <br/>AI tools will be ready to assist you.
           </p>
           <button
             onClick={() => { onToggleLibrary(); }}
-            className="px-12 py-5 bg-blue-600 text-white rounded-2xl font-bold shadow-2xl shadow-blue-500/40 hover:scale-105 active:scale-95 transition-all text-xl cursor-pointer pointer-events-auto"
+            className="group relative px-6 py-3 bg-zinc-900 dark:bg-white text-zinc-50 dark:text-zinc-900 rounded-xl font-medium tracking-wide overflow-hidden shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
-            Open Library
+            <span className="relative z-10 flex items-center gap-2">
+              <LibraryManagerIcon size={18} />
+              Open Library
+            </span>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
           </button>
         </div>
       </div>
@@ -620,33 +653,33 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     <div className="relative w-full h-full flex flex-col">
 
       <div className="absolute top-6 right-6 z-40 flex items-center gap-2 pointer-events-none">
-        <div className="flex items-center gap-1 p-1 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-200 dark:border-zinc-800 rounded-full shadow-xl pointer-events-auto transition-all hover:bg-gray-50 dark:hover:bg-zinc-900">
-          <div className="flex items-center px-2 border-r border-zinc-200 dark:border-zinc-800">
-            <button onClick={() => setZoomLevel(z => Math.max(50, z - 10))} className="p-1.5 hover:text-zinc-900 dark:hover:text-white text-zinc-500 dark:text-zinc-400 rounded-full"><ChevronDown size={14} /></button>
-            <span className="text-[10px] font-mono w-8 text-center text-zinc-500 dark:text-zinc-400">{zoomLevel}%</span>
-            <button onClick={() => setZoomLevel(z => Math.min(200, z + 10))} className="p-1.5 hover:text-zinc-900 dark:hover:text-white text-zinc-500 dark:text-zinc-400 rounded-full"><ChevronUp size={14} /></button>
+        <div className="flex items-center gap-1 p-1 bg-[color:var(--bg-panel)]/80 dark:bg-[color:var(--bg-panel)]/80 backdrop-blur-xl border border-[color:var(--border)] rounded-full shadow-2xl shadow-black/10 pointer-events-auto transition-all hover:bg-[color:var(--bg-panel)]">
+          <div className="flex items-center px-2 border-r border-[color:var(--border)]">
+            <button onClick={() => setZoomLevel(z => Math.max(50, z - 10))} className="p-1.5 hover:text-[color:var(--fg-primary)] text-[color:var(--fg-secondary)] rounded-full"><ChevronDown size={14} /></button>
+            <span className="text-[10px] font-mono w-8 text-center text-[color:var(--fg-secondary)]">{zoomLevel}%</span>
+            <button onClick={() => setZoomLevel(z => Math.min(200, z + 10))} className="p-1.5 hover:text-[color:var(--fg-primary)] text-[color:var(--fg-secondary)] rounded-full"><ChevronUp size={14} /></button>
           </div>
 
-          <div className="flex items-center px-2 border-r border-zinc-200 dark:border-zinc-800 relative group">
-            <Search size={14} className="text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-white" />
+          <div className="flex items-center px-2 border-r border-[color:var(--border)] relative group">
+            <Search size={14} className="text-[color:var(--fg-secondary)] group-hover:text-[color:var(--fg-primary)]" />
             <input
               ref={searchInputRef}
-              className="w-0 group-hover:w-32 focus:w-32 transition-all duration-300 bg-transparent border-none text-xs text-zinc-900 dark:text-white focus:outline-none ml-2 placeholder-zinc-400 dark:placeholder-zinc-600"
-              placeholder="Find..."
+              className="w-0 group-hover:w-32 focus:w-32 transition-all duration-300 bg-transparent border-none text-xs text-[color:var(--fg-primary)] focus:outline-none ml-2 placeholder-[color:var(--fg-tertiary)]"
+              placeholder="Find in text..."
               value={docSearchQuery}
               onChange={(e) => setDocSearchQuery(e.target.value)}
             />
             {docSearchMatches.length > 0 && (
-              <button onClick={() => navigateSearchResults(1)} className="ml-1 hover:text-zinc-900 dark:hover:text-white text-zinc-500 dark:text-zinc-400"><ChevronDown size={12} /></button>
+              <button onClick={() => navigateSearchResults(1)} className="ml-1 hover:text-[color:var(--fg-primary)] text-[color:var(--fg-secondary)]"><ChevronDown size={12} /></button>
             )}
           </div>
 
           <button
             onClick={() => setExportModalOpen(true)}
-            className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-all mr-1"
+            className="p-2 text-[color:var(--fg-secondary)] hover:text-[color:var(--fg-primary)] transition-all mr-1"
             title="Smart Export (Synthesis)"
           >
-            <Download size={18} />
+            <Download size={16} />
           </button>
         </div>
       </div>
@@ -736,6 +769,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
           annotations={annotations}
           settings={settings}
           title={activeFile.title}
+          bookmarkId={currentBookmarkId}
         />
       )}
 

@@ -8,33 +8,65 @@ export class ReaderParser {
     private static cleanHtml(html: string): string {
         const div = document.createElement('div');
         div.innerHTML = html;
-        const cleaners = div.querySelectorAll('abbr, font, span.immersive-translate-target-abbr, article, section, br');
-        cleaners.forEach(c => {
-             if (c.tagName === 'BR') {
-                c.replaceWith(document.createTextNode(' '));
-                return;
-            }
-            const fragment = document.createDocumentFragment();
-            while (c.firstChild) {
-                fragment.appendChild(c.firstChild);
-            }
-            c.replaceWith(fragment, document.createTextNode(' '));
-        });
+        
+        // 1. Remove Distractions (Scripts, Styles, Ads, Hidden Translate Elements)
+        const removals = div.querySelectorAll('script, style, noscript, iframe, .immersive-translate-target-abbr, .immersive-translate-input');
+        removals.forEach(el => el.remove());
+
+        // 2. Specialized Cleaning for Common Math/Layout issues
+        // Replace <br> with space to prevent word concatenation
+        div.querySelectorAll('br').forEach(br => br.replaceWith(document.createTextNode(' ')));
+        
+        // 3. Recursive Text Normalization & Structural Preservation
+        // We traverse carefully. If node is a structural block, we ensure it is separated by whitespace.
         const walk = (node: Node) => {
             if (node.nodeType === Node.TEXT_NODE) {
-                let text = node.textContent || '';
-                text = text.replace(/[\n\r\t]+/g, ' ').replace(/\s{2,}/g, ' ');
-                text = text.replace(/(\d)\s+(?=\d|%)/g, '$1');
-                text = text.replace(/%\s+(?=%)/g, '');
-                text = text.replace(/\\mathbf\{([\s\S]*?)\}/gi, '$1').replace(/\\%|%/g, '%');
-                node.textContent = text;
-            } else if (['IMG', 'FIGURE', 'PICTURE', 'SVG', 'MATH', 'SUP', 'SUB', 'SMALL', 'STRONG', 'EM', 'B', 'I'].includes(node.nodeName.toUpperCase())) {
-                // preserve
-            } else {
-                node.childNodes.forEach(walk);
+                // Gentle text cleaning.
+                // Do NOT aggressively strip backslashes or braces which might be LaTeX.
+                // Do NOT squash newlines if they are meaningful, but in HTML, mostly they are spaces.
+                const text = node.textContent || '';
+                // Collapse multi-spaces to single space, but keep distinctness.
+                node.textContent = text.replace(/[\n\r\t]+/g, ' ').replace(/\s{2,}/g, ' ');
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const el = node as Element;
+                const tag = el.tagName.toUpperCase();
+                
+                // Allow List: Semantic Structure & Formatting
+                // We preserve these tags to keep the document structure intact.
+                // MathML tags (MATH, MROW...) are preserved by default if browser parses them, 
+                // but we explicitly allow them just in case.
+                const ALLOWED_TAGS = [
+                    'DIV', 'P', 'SPAN', 'BLOCKQUOTE', 'PRE', 'CODE',
+                    'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+                    'UL', 'OL', 'LI', 'DL', 'DT', 'DD',
+                    'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD',
+                    'STRONG', 'EM', 'B', 'I', 'U', 'S', 'MARK', 'SMALL', 'SUB', 'SUP',
+                    'IMG', 'FIGURE', 'FIGCAPTION', 'PICTURE', 'SVG', 'PATH', 'CIRCLE', 'RECT', 'LINE', 'POLYLINE', 'POLYGON',
+                    'MATH', 'MI', 'MN', 'MO', 'MTEXT', 'MROW', 'MSUB', 'MSUP', 'MFRAC', 'MSTYLE'
+                ];
+
+                if (ALLOWED_TAGS.includes(tag)) {
+                    // Recurse into children
+                    node.childNodes.forEach(walk);
+                } else {
+                    // For unknown tags (e.g. invalid HTML or custom tags), unwrap them but keep content
+                    // e.g. <custom>Text</custom> -> Text
+                    // But if it's block-like, we might want to ensure a space?
+                    // For now, simpler unwrapping.
+                    const fragment = document.createDocumentFragment();
+                    while (node.firstChild) {
+                        walk(node.firstChild);
+                        fragment.appendChild(node.firstChild);
+                    }
+                    node.replaceWith(fragment);
+                }
             }
         };
+
         walk(div);
+        
+        // Post-Processing: HTML entity decoding is handled by browser DOM parser automatically.
+        // We just trim the final result.
         return div.innerHTML.trim();
     }
 
