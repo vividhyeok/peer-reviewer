@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { readFileSafe } from '../core/FileSystem';
-import { ReaderParser } from '../core/ReaderParser';
 import { LibraryManager, type LibraryItem } from '../core/LibraryManager';
-import { toPlainTextFromHtml } from '../core/TextRendering';
 import { LocalStorageManager } from '../core/LocalStorageManager';
+import { DocumentSessionManager, DocumentSession } from '../core/DocumentSessionManager';
 import type { ParagraphData, PaperStructure, Annotation } from '../types/ReaderTypes';
 import { AnnotationManager } from '../core/AnnotationManager';
 
@@ -28,84 +26,92 @@ export function useDocumentLoader({
   const [loading, setLoading] = useState(false);
   const [paragraphs, setParagraphs] = useState<ParagraphData[]>([]);
   const [error, setError] = useState<string | null>(null);
+  
+  const sessionRef = useRef<DocumentSession | null>(null);
 
   useEffect(() => {
     if (!activeFile) {
-      setParagraphs([]);
-      return;
+        if (sessionRef.current) {
+            // Auto-save on closing
+            sessionRef.current.save().catch(console.error);
+            sessionRef.current = null;
+        }
+        setParagraphs([]);
+        return;
     }
 
     const load = async () => {
+      // 0. Auto-save previous session if switching files
+      if (sessionRef.current && sessionRef.current.id !== activeFile.filePath) {
+          console.log("Saving previous session", sessionRef.current.id);
+          await sessionRef.current.save();
+          sessionRef.current = null;
+      }
+      
+      // If already loaded for this file, skip
+      if (sessionRef.current && sessionRef.current.id === activeFile.filePath && paragraphs.length > 0) {
+          return; 
+      }
+
       setLoading(true);
       setError(null);
       
       try {
-        // 1. Update Last Opened
-        LibraryManager.touchItem(activeFile.id);
+        if (!storageManager) {
+             // If storage not ready, we can't load session. 
+             // We'll return and wait for next render when storageManager is present
+             return;
+        }
 
-        // 2. Read File Content
-        let text: string | null = null;
+        // 1. Get Session
+        const session = DocumentSessionManager.getSession(activeFile.filePath, storageManager);
+        sessionRef.current = session;
         
-        // Try File System First (Priority: Disk > Cache)
-        if (storageManager) {
-          const basename = activeFile.filePath.split(/[\\/]/).pop() || activeFile.filePath;
-          text = await storageManager.readFile(basename);
+        // Link AnnotationManager for Reader interactions
+        annotationManagerRef.current = session.annotationManager;
+
+        // 2. Load Session State
+        const state = await session.load();
+
+        // 3. Hydrate Images (Legacy Logic adapted)
+        let finalParagraphs = state.paragraphs;
+        if (storageManager.isConnected) {
+            finalParagraphs = await Promise.all(state.paragraphs.map(async (p) => {
+                if (p.type === 'image' && p.metadata?.src && 
+                    !p.metadata.src.startsWith('http') && 
+                    !p.metadata.src.startsWith('data:')) {
+                    try {
+                        const decodedSrc = decodeURIComponent(p.metadata.src);
+                        const blobUrl = await storageManager.loadFileAsUrl(decodedSrc);
+                        if (blobUrl) {
+                            return { ...p, metadata: { ...p.metadata, src: blobUrl } };
+                        }
+                    } catch (e) {
+                         // silently fail image hydration
+                    }
+                }
+                return p;
+            })); 
         }
 
-        // Fallback to safe reader (cache/public)
-        if (!text) {
-          text = await readFileSafe(activeFile.filePath);
-        }
-
-        // 3. Parse HTML
-        const { paragraphs: parsedParagraphs, structure } = ReaderParser.parse(text, activeFile.filePath);
-
-        // 4. Hydrate Images (Local File System)
-        let finalParagraphs = parsedParagraphs;
-        if (storageManager && storageManager.isConnected) {
-          finalParagraphs = await Promise.all(parsedParagraphs.map(async (p) => {
-            if (p.type === 'image' && p.metadata?.src && 
-                !p.metadata.src.startsWith('http') && 
-                !p.metadata.src.startsWith('data:')) {
-               
-               try {
-                 const decodedSrc = decodeURIComponent(p.metadata.src);
-                 const blobUrl = await storageManager.loadFileAsUrl(decodedSrc);
-                 if (blobUrl) {
-                   return { ...p, metadata: { ...p.metadata, src: blobUrl } };
-                 }
-               } catch (err) {
-                 console.warn("Image hydration failed for", p.metadata.src);
-               }
-            }
-            return p;
-          }));
-        }
-        
         setParagraphs(finalParagraphs);
 
-        // 5. Callback: Structure
-        if (onStructureLoaded) {
-          onStructureLoaded(structure);
-        }
-
-        // 6. Callback: Full Text
-        const fullText = finalParagraphs.map(p => toPlainTextFromHtml(p.enText)).join('\n\n');
-        if (onDocumentLoaded) {
-          onDocumentLoaded(fullText);
-          window.dispatchEvent(new CustomEvent('document-loaded', { detail: { text: fullText } }));
-        }
-
-        // 7. Load Annotations
-        const manager = new AnnotationManager(activeFile.filePath, storageManager || undefined);
-        annotationManagerRef.current = manager;
-        const loadedAnnotations = await manager.load();
+        // 4. Update Global/Parent State
+        LibraryManager.touchItem(activeFile.id);
         
-        // Filter out insights if needed (or keep them based on preference)
-        const cleanLoaded = loadedAnnotations.filter(a => a.type !== 'insight');
-        onAnnotationsChange(cleanLoaded);
+        if (onStructureLoaded) {
+            onStructureLoaded(state.structure);
+        }
+        
+        if (onDocumentLoaded) {
+            onDocumentLoaded(state.content);
+            window.dispatchEvent(new CustomEvent('document-loaded', { detail: { text: state.content } }));
+        }
+        
+        // Sync Annotations
+        onAnnotationsChange(state.annotations);
 
-        // 8. Restore Scroll Position
+        // 5. Scroll Restore
         handleScrollRestoration(activeFile);
 
       } catch (e: any) {
@@ -118,9 +124,10 @@ export function useDocumentLoader({
     };
 
     load();
-  }, [activeFile]); // Depend on activeFile
 
-  return { loading, paragraphs, setParagraphs, error };
+  }, [activeFile, storageManager]);
+
+  return { loading, paragraphs, setParagraphs, error, sessionRef };
 }
 
 function handleScrollRestoration(activeFile: LibraryItem) {

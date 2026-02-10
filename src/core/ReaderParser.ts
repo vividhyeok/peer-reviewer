@@ -102,6 +102,9 @@ export class ReaderParser {
     }
 
     static parse(html: string, baseUrl: string = ''): { paragraphs: ParagraphData[], structure: PaperStructure } {
+        // Optimization check - if HTML is extremely large, maybe warn or chunk?
+        // (Currently standard parse)
+
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         

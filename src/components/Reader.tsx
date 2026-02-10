@@ -68,7 +68,7 @@ import { FlashcardReview } from './FlashcardReview';
 
 import { CS_RESEARCH_PROMPTS } from '../core/Prompts';
 
-export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLibrary, onDocumentLoaded, onStructureLoaded, annotations, onAnnotationsChange, onExplainImage, storageManager }) => {
+export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLibrary, onDocumentLoaded, onStructureLoaded, annotations, onAnnotationsChange: _onAnnotationsChange, onExplainImage, storageManager }) => {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
@@ -81,14 +81,22 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // --- Hook Integration ---
-  const { loading: isLoading, paragraphs, setParagraphs } = useDocumentLoader({
+  const { loading: isLoading, paragraphs, setParagraphs, sessionRef } = useDocumentLoader({
       activeFile,
       storageManager,
       onStructureLoaded,
       onDocumentLoaded,
-      onAnnotationsChange,
+      onAnnotationsChange: _onAnnotationsChange,
       annotationManagerRef
   });
+
+  // Wrapper to update dirty state in session
+  const onAnnotationsChange = useCallback((newAnnos: Annotation[]) => {
+      _onAnnotationsChange(newAnnos);
+      if (sessionRef.current) {
+          sessionRef.current.setAnnotations(newAnnos);
+      }
+  }, [_onAnnotationsChange]);
   // ------------------------
 
   const [toolbarVisible, setToolbarVisible] = useState(false);
@@ -263,12 +271,16 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
   };
 
   useEffect(() => {
-    if (!filePath || !annotationManagerRef.current) return;
+    // Dirty Flag Saving Strategy:
+    // Periodically check session dirty state and save if needed.
+    // Minimizes disk writes compared to blind saving.
     const interval = setInterval(() => {
-      void annotationManagerRef.current?.save(annotationsRef.current);
+        if (sessionRef.current) {
+            sessionRef.current.save().catch(console.error);
+        }
     }, settings.autoSaveInterval * 1000);
     return () => clearInterval(interval);
-  }, [filePath, settings.autoSaveInterval]);
+  }, [settings.autoSaveInterval]);
 
   const annotationsByParagraph = useMemo(() => {
     const map: Record<string, Annotation[]> = {};

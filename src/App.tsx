@@ -155,18 +155,12 @@ function App() {
     checkStorage();
   }, [syncLibraryWithStorage]);
 
-  // Auto-save Annotations (Debounced)
+  // Auto-save Annotations (Handled by Reader Session with Dirty Flags)
+  // We keep this useEffect strict or remove it to avoid conflicts.
+  // The Reader component now manages session.save() based on dirty state.
   useEffect(() => {
-    if (!activeFileId || annotations.length === 0) return;
-    const timer = setTimeout(() => {
-        const file = library.find(f => f.id === activeFileId);
-        if (file && storageManagerRef.current) {
-            const manager = new AnnotationManager(file.filePath, storageManagerRef.current);
-            manager.save(annotations).catch(() => {});
-        }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [annotations, activeFileId, library]);
+    // Legacy auto-save removed.
+  }, []);
 
   // Global Keybindings & Events
   useEffect(() => {
