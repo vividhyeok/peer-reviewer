@@ -1,4 +1,4 @@
-export type AnnotationType = 'definition' | 'discussion' | 'comment' | 'highlight' | 'insight' | 'question' | 'note' | 'ai_response';
+export type AnnotationType = 'definition' | 'discussion' | 'comment' | 'highlight' | 'insight' | 'question' | 'note' | 'ai_response' | 'manual-definition';
 
 export interface AnnotationTarget {
     paragraphId: string;
@@ -96,7 +96,7 @@ export interface PaperSummary {
     limitations?: string;
 }
 
-export type AgentTaskType = 'search' | 'extract' | 'analyze' | 'author-sim' | 'synthesize';
+export type AgentTaskType = 'search' | 'extract' | 'analyze' | 'author-sim' | 'synthesize' | 'critic' | 'hypothesize';
 
 export interface AgentThought {
     id: string;

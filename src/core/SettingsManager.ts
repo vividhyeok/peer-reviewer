@@ -15,6 +15,7 @@ export class SettingsManager {
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
+        theme: 'light', // FORCE LIGHT MODE
         // Ensure all keys exist
         apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...parsed.apiKeys },
         modelAssignments: { ...DEFAULT_SETTINGS.modelAssignments, ...parsed.modelAssignments },

@@ -1,73 +1,758 @@
-import { type ParagraphData, type AlignedSentence, type Citation, type TocItem, type PaperStructure } from '../types/ReaderTypes';
+import {
+    type ParagraphData,
+    type AlignedSentence,
+    type Citation,
+    type TocItem,
+    type PaperStructure
+} from '../types/ReaderTypes';
+
+type ParagraphType = ParagraphData['type'];
+
+interface ParserContext {
+    index: number;
+    seenSignatures: Set<string>;
+    toc: TocItem[];
+    figures: { id: string; desc: string }[];
+    tables: { id: string; desc: string }[];
+}
+
+const BLOCK_TAGS = new Set([
+    'p', 'div', 'blockquote', 'pre', 'table', 'figure', 'img', 'picture', 'hr',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'dt', 'dd'
+]);
+
+const CONTAINER_TAGS = new Set(['body', 'main', 'article', 'section', 'header', 'footer', 'aside', 'nav']);
+
+const ALLOWED_TAGS = new Set([
+    'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'code', 'div', 'em', 'figcaption', 'figure',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img', 'li', 'mark', 'ol', 'p', 'picture',
+    'pre', 's', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th',
+    'thead', 'tr', 'u', 'ul'
+]);
+
+const TRANSLATION_WRAPPER_SELECTOR = '.immersive-translate-target-wrapper,[class*="immersive-translate-target-wrapper"]';
+const TRANSLATION_INNER_SELECTOR = '.immersive-translate-target-inner,[class*="immersive-translate-target-inner"]';
+const TRANSLATION_BLOCK_SELECTOR = '[class*="immersive-translate-target-translation-"]';
 
 export class ReaderParser {
-    private static isKorean(text: string): boolean {
-        return /[\uac00-\ud7af]|[\u1100-\u11ff]|[\u3130-\u318f]|[\ua960-\ua97f]|[\ud7b0-\ud7ff]/.test(text);
+    static parse(source: string, baseUrl: string = ''): { paragraphs: ParagraphData[]; structure: PaperStructure } {
+        const normalizedSource = this.normalizeSource(source);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(normalizedSource, 'text/html');
+        const root = this.pickRoot(doc);
+
+        this.removeGlobalNoise(doc);
+
+        const context: ParserContext = {
+            index: 0,
+            seenSignatures: new Set<string>(),
+            toc: [],
+            figures: [],
+            tables: []
+        };
+
+        const paragraphs: ParagraphData[] = [];
+        const blocks = this.collectBlockNodes(root);
+
+        for (const block of blocks) {
+            const paragraph = this.parseBlock(block, baseUrl, context);
+            if (!paragraph) continue;
+            paragraphs.push(paragraph);
+        }
+
+        if (paragraphs.length === 0) {
+            const fallbackText = this.normalizeWhitespace(root.textContent || '');
+            if (fallbackText) {
+                const id = this.generateHash(`fallback-${fallbackText.slice(0, 80)}`);
+                paragraphs.push({
+                    id,
+                    type: 'text',
+                    element: 'p',
+                    enText: this.escapeHtml(fallbackText),
+                    koText: '',
+                    sentences: [{ en: this.escapeHtml(fallbackText), ko: '' }],
+                    citations: this.extractCitations(fallbackText),
+                    index: 0,
+                    isReference: false
+                });
+            }
+        }
+
+        this.resolveCitationTargets(paragraphs);
+
+        return {
+            paragraphs,
+            structure: {
+                toc: context.toc,
+                figures: context.figures,
+                tables: context.tables
+            }
+        };
     }
 
-    private static cleanHtml(html: string): string {
-        const div = document.createElement('div');
-        div.innerHTML = html;
-        
-        // 1. Remove Distractions (Scripts, Styles, Ads, Hidden Translate Elements)
-        const removals = div.querySelectorAll('script, style, noscript, iframe, .immersive-translate-target-abbr, .immersive-translate-input');
-        removals.forEach(el => el.remove());
+    private static normalizeSource(source: string): string {
+        if (this.isLikelyMarkdown(source)) {
+            return this.markdownToHtml(source);
+        }
+        return source;
+    }
 
-        // 2. Specialized Cleaning for Common Math/Layout issues
-        // Replace <br> with space to prevent word concatenation
-        div.querySelectorAll('br').forEach(br => br.replaceWith(document.createTextNode(' ')));
-        
-        // 3. Recursive Text Normalization & Structural Preservation
-        // We traverse carefully. If node is a structural block, we ensure it is separated by whitespace.
-        const walk = (node: Node) => {
-            if (node.nodeType === Node.TEXT_NODE) {
-                // Gentle text cleaning.
-                // Do NOT aggressively strip backslashes or braces which might be LaTeX.
-                // Do NOT squash newlines if they are meaningful, but in HTML, mostly they are spaces.
-                const text = node.textContent || '';
-                // Collapse multi-spaces to single space, but keep distinctness.
-                node.textContent = text.replace(/[\n\r\t]+/g, ' ').replace(/\s{2,}/g, ' ');
-            } else if (node.nodeType === Node.ELEMENT_NODE) {
-                const el = node as Element;
-                const tag = el.tagName.toUpperCase();
-                
-                // Allow List: Semantic Structure & Formatting
-                // We preserve these tags to keep the document structure intact.
-                // MathML tags (MATH, MROW...) are preserved by default if browser parses them, 
-                // but we explicitly allow them just in case.
-                const ALLOWED_TAGS = [
-                    'DIV', 'P', 'SPAN', 'BLOCKQUOTE', 'PRE', 'CODE',
-                    'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-                    'UL', 'OL', 'LI', 'DL', 'DT', 'DD',
-                    'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD',
-                    'STRONG', 'EM', 'B', 'I', 'U', 'S', 'MARK', 'SMALL', 'SUB', 'SUP',
-                    'IMG', 'FIGURE', 'FIGCAPTION', 'PICTURE', 'SVG', 'PATH', 'CIRCLE', 'RECT', 'LINE', 'POLYLINE', 'POLYGON',
-                    'MATH', 'MI', 'MN', 'MO', 'MTEXT', 'MROW', 'MSUB', 'MSUP', 'MFRAC', 'MSTYLE'
-                ];
+    private static isLikelyMarkdown(source: string): boolean {
+        const trimmed = source.trim();
+        if (!trimmed) return false;
+        if (/<(html|head|body|div|p|h1|h2|h3|h4|h5|h6|table|figure|img)\b/i.test(trimmed)) {
+            return false;
+        }
 
-                if (ALLOWED_TAGS.includes(tag)) {
-                    // Recurse into children
-                    node.childNodes.forEach(walk);
+        return (
+            /^#{1,6}\s+/m.test(trimmed) ||
+            /^[-*+]\s+/m.test(trimmed) ||
+            /^\d+\.\s+/m.test(trimmed) ||
+            /\|.+\|/.test(trimmed)
+        );
+    }
+
+    private static markdownToHtml(markdown: string): string {
+        const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+        const htmlLines: string[] = [];
+        let inList = false;
+        let inCode = false;
+
+        const flushList = () => {
+            if (!inList) return;
+            htmlLines.push('</ul>');
+            inList = false;
+        };
+
+        for (const rawLine of lines) {
+            const line = rawLine.trimEnd();
+
+            if (/^```/.test(line)) {
+                if (inCode) {
+                    htmlLines.push('</code></pre>');
                 } else {
-                    // For unknown tags (e.g. invalid HTML or custom tags), unwrap them but keep content
-                    // e.g. <custom>Text</custom> -> Text
-                    // But if it's block-like, we might want to ensure a space?
-                    // For now, simpler unwrapping.
-                    const fragment = document.createDocumentFragment();
-                    while (node.firstChild) {
-                        walk(node.firstChild);
-                        fragment.appendChild(node.firstChild);
-                    }
-                    node.replaceWith(fragment);
+                    flushList();
+                    htmlLines.push('<pre><code>');
                 }
+                inCode = !inCode;
+                continue;
+            }
+
+            if (inCode) {
+                htmlLines.push(this.escapeHtml(rawLine));
+                continue;
+            }
+
+            const heading = line.match(/^(#{1,6})\s+(.*)$/);
+            if (heading) {
+                flushList();
+                const level = heading[1].length;
+                htmlLines.push(`<h${level}>${this.escapeHtml(heading[2].trim())}</h${level}>`);
+                continue;
+            }
+
+            const listItem = line.match(/^[-*+]\s+(.*)$/);
+            if (listItem) {
+                if (!inList) {
+                    htmlLines.push('<ul>');
+                    inList = true;
+                }
+                htmlLines.push(`<li>${this.escapeHtml(listItem[1].trim())}</li>`);
+                continue;
+            }
+
+            flushList();
+            if (!line.trim()) {
+                continue;
+            }
+
+            htmlLines.push(`<p>${this.escapeHtml(line.trim())}</p>`);
+        }
+
+        flushList();
+
+        if (inCode) {
+            htmlLines.push('</code></pre>');
+        }
+
+        return `<html><body>${htmlLines.join('\n')}</body></html>`;
+    }
+
+    private static pickRoot(doc: Document): Element {
+        const candidates = [
+            doc.querySelector('#preview-content'),
+            doc.querySelector('#setText'),
+            doc.querySelector('#pdf-pro-content #preview-content'),
+            doc.querySelector('[id*="preview-content"]'),
+            doc.querySelector('article'),
+            doc.querySelector('main'),
+            doc.body,
+            doc.documentElement
+        ].filter(Boolean) as Element[];
+
+        let best = candidates[0] || (doc.body || doc.documentElement);
+        let bestScore = -1;
+
+        for (const candidate of candidates) {
+            const score = this.normalizeWhitespace(candidate.textContent || '').length;
+            if (score > bestScore) {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static removeGlobalNoise(doc: Document): void {
+        doc.querySelectorAll(
+            'script,style,noscript,iframe,meta,link,object,template,.immersive-translate-input,.immersive-translate-target-abbr'
+        ).forEach((node) => node.remove());
+
+        // Remove known garbage classes
+        doc.querySelectorAll(
+            '.MathJax_Preview,.mjx-assistive-mml,table-markdown,tsv,block-markdown'
+        ).forEach((node) => node.remove());
+
+        // Remove elements explicitly hidden via inline styles, BUT preserve math source tags
+        doc.querySelectorAll(
+            '[style*="display: none"]:not(latex):not(asciimath),[style*="display:none"]:not(latex):not(asciimath)'
+        ).forEach((node) => node.remove());
+    }
+
+    private static collectBlockNodes(root: Element): Element[] {
+        const blocks: Element[] = [];
+
+        const visit = (node: Element) => {
+            if (this.shouldSkipNode(node)) return;
+
+            const tag = node.tagName.toLowerCase();
+
+            if (tag === 'ul' || tag === 'ol' || tag === 'dl') {
+                Array.from(node.children).forEach((child) => visit(child as Element));
+                return;
+            }
+
+            if (tag === 'li' || tag === 'dt' || tag === 'dd') {
+                const nested = this.getBlockChildren(node);
+                if (nested.length === 0) {
+                    blocks.push(node);
+                    return;
+                }
+                nested.forEach(visit);
+                return;
+            }
+
+            if (this.isAtomicBlock(node) || this.isHeading(node)) {
+                blocks.push(node);
+                return;
+            }
+
+            const blockChildren = this.getBlockChildren(node);
+            const directText = this.getDirectText(node);
+            const hasStructuralHint =
+                node.hasAttribute('data-imt-p') ||
+                node.classList.contains('abstract') ||
+                node.classList.contains('author') ||
+                node.classList.contains('caption_table') ||
+                node.classList.contains('section-title') ||
+                node.classList.contains('sub_section-title');
+
+            const hasUsefulMedia = !!node.querySelector('img,table,figure,picture');
+
+            if (
+                (tag === 'p' || tag === 'blockquote' || tag === 'pre') &&
+                (directText.length > 0 || hasUsefulMedia || hasStructuralHint)
+            ) {
+                blocks.push(node);
+                return;
+            }
+
+            if (
+                tag === 'div' &&
+                (hasStructuralHint || blockChildren.length === 0) &&
+                (directText.length > 0 || hasUsefulMedia)
+            ) {
+                blocks.push(node);
+                return;
+            }
+
+            if (blockChildren.length > 0 || CONTAINER_TAGS.has(tag) || tag === 'div') {
+                Array.from(node.children).forEach((child) => visit(child as Element));
+                return;
+            }
+
+            if (directText.length > 0) {
+                blocks.push(node);
             }
         };
 
-        walk(div);
+        Array.from(root.children).forEach((child) => visit(child as Element));
+
+        return blocks;
+    }
+
+    private static shouldSkipNode(node: Element): boolean {
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'script' || tag === 'style' || tag === 'noscript') return true;
+        if (node.closest('head')) return true;
+        if (node.classList.contains('immersive-translate-input')) return true;
+        if (node.getAttribute('aria-hidden') === 'true') return true;
+
+        const cls = node.className || '';
+        if (typeof cls === 'string') {
+            if (/\bant-/.test(cls) && !node.hasAttribute('data-imt-p')) return true;
+            if (/\bimmersive-translate-modal\b/.test(cls)) return true;
+        }
+
+        return false;
+    }
+
+    private static isAtomicBlock(node: Element): boolean {
+        const tag = node.tagName.toLowerCase();
+        if (tag === 'img' || tag === 'figure' || tag === 'picture' || tag === 'table' || tag === 'hr') return true;
+        if (node.classList.contains('inline-tabular')) return true;
+        return false;
+    }
+
+    private static isHeading(node: Element): boolean {
+        return /^h[1-6]$/i.test(node.tagName);
+    }
+
+    private static getBlockChildren(node: Element): Element[] {
+        return Array.from(node.children).filter((child) => {
+            const el = child as Element;
+            const tag = el.tagName.toLowerCase();
+            return BLOCK_TAGS.has(tag) || this.isHeading(el) || this.isAtomicBlock(el);
+        }) as Element[];
+    }
+
+    private static getDirectText(node: Element): string {
+        let text = '';
+        for (const child of Array.from(node.childNodes)) {
+            if (child.nodeType === Node.TEXT_NODE) {
+                text += child.textContent || '';
+            }
+        }
+        return this.normalizeWhitespace(text);
+    }
+
+    private static parseBlock(node: Element, baseUrl: string, context: ParserContext): ParagraphData | null {
+        const tag = node.tagName.toLowerCase();
+        const { enHtml, koHtml } = this.extractBilingualContent(node);
+
+        let cleanEn = this.sanitizeHtml(enHtml, { preserveSvg: false });
+        const cleanKo = this.sanitizeHtml(koHtml, { preserveSvg: false });
+
+        const plainEn = this.toPlainText(cleanEn);
+        const plainKo = this.toPlainText(cleanKo);
+
+        const looksEmpty = plainEn.length === 0 && plainKo.length === 0;
+        const hasImage = !!node.querySelector('img');
+        const hasTable = !!node.querySelector('table');
+
+        if (looksEmpty && !hasImage && !hasTable && tag !== 'hr') {
+            return null;
+        }
+
+        const typeInfo = this.detectParagraphType(node, cleanEn, plainEn);
+        const safeElement = this.normalizeElementTag(tag, typeInfo.type);
+
+        if (typeInfo.type === 'image' && typeInfo.metadata.src) {
+            typeInfo.metadata.src = this.resolveAssetUrl(baseUrl, typeInfo.metadata.src);
+        }
+
+        if (typeInfo.type === 'table') {
+            const tableNode = node.tagName.toLowerCase() === 'table' ? node : node.querySelector('table');
+            if (tableNode) {
+                cleanEn = this.sanitizeHtml(tableNode.outerHTML, { preserveSvg: true });
+            }
+        }
+
+        const signatureBase = `${typeInfo.type}|${safeElement}|${this.normalizeWhitespace((plainEn || plainKo).toLowerCase()).slice(0, 220)}`;
+        if (context.seenSignatures.has(signatureBase)) {
+            return null;
+        }
+        context.seenSignatures.add(signatureBase);
+
+        const id = this.generateHash(`${signatureBase}|${context.index}`);
+        const visibleText = plainEn || plainKo;
+
+        if (typeInfo.type === 'heading') {
+            typeInfo.metadata.headingId = node.id || id;
+            context.toc.push({
+                id: typeInfo.metadata.headingId,
+                text: visibleText,
+                level: typeInfo.metadata.headingLevel || 1,
+                paragraphId: id
+            });
+        }
+
+        if (typeInfo.type === 'image') {
+            context.figures.push({
+                id,
+                desc: typeInfo.metadata.caption || typeInfo.metadata.alt || 'Figure'
+            });
+        }
+
+        if (typeInfo.type === 'table') {
+            context.tables.push({
+                id,
+                desc: typeInfo.metadata.caption || visibleText.slice(0, 120) || 'Table'
+            });
+        }
+
+        const citations = this.extractCitations(visibleText);
+        const sentences = this.alignSentences(cleanEn, cleanKo);
+        const isReference = this.isReferenceText(visibleText);
+
+        const paragraph: ParagraphData = {
+            id,
+            type: typeInfo.type,
+            element: safeElement,
+            enText: cleanEn,
+            koText: cleanKo,
+            sentences,
+            citations,
+            index: context.index++,
+            metadata: typeInfo.metadata,
+            isReference
+        };
+
+        return paragraph;
+    }
+
+    private static extractBilingualContent(node: Element): { enHtml: string; koHtml: string } {
+        const working = node.cloneNode(true) as Element;
+        const koChunks: string[] = [];
+
+        const wrappers = Array.from(working.querySelectorAll(TRANSLATION_WRAPPER_SELECTOR)).filter((candidate) => {
+            const parent = (candidate as Element).parentElement;
+            return !parent || !parent.matches(TRANSLATION_WRAPPER_SELECTOR);
+        });
+        for (const wrapperNode of wrappers) {
+            const wrapper = wrapperNode as Element;
+            const innerChunks = Array.from(wrapper.querySelectorAll(TRANSLATION_INNER_SELECTOR))
+                .map((inner) => (inner as HTMLElement).innerHTML)
+                .map((chunk) => this.normalizeTranslationChunk(chunk))
+                .filter(Boolean);
+
+            if (innerChunks.length > 0) {
+                koChunks.push(innerChunks.join(' '));
+            } else {
+                koChunks.push(this.normalizeTranslationChunk(wrapper.innerHTML));
+            }
+
+            wrapper.remove();
+        }
+
+        working.querySelectorAll(TRANSLATION_BLOCK_SELECTOR).forEach((el) => el.remove());
+
+        const enHtml = (working as HTMLElement).innerHTML || '';
+        const koHtml = koChunks.join(' ');
+
+        return { enHtml, koHtml };
+    }
+
+    private static normalizeTranslationChunk(html: string): string {
+        return html
+            .replace(/^\s*<br\s*\/?>/i, '')
+            .replace(/<br\s*\/?>\s*$/i, '')
+            .trim();
+    }
+
+    private static sanitizeHtml(html: string, options: { preserveSvg: boolean }): string {
+        if (!html) return '';
+
+        const root = document.createElement('div');
+        root.innerHTML = html;
+
+        root.querySelectorAll('script,style,noscript,iframe,object,meta,link,form,input,textarea,select,button').forEach((el) => el.remove());
+        root.querySelectorAll('.immersive-translate-input,.immersive-translate-target-abbr').forEach((el) => el.remove());
         
-        // Post-Processing: HTML entity decoding is handled by browser DOM parser automatically.
-        // We just trim the final result.
-        return div.innerHTML.trim();
+        // Remove hidden elements that escaped global noise removal (e.g. inside chunks)
+        root.querySelectorAll('[style*="display: none"],[style*="display:none"],table-markdown,tsv').forEach((el) => el.remove());
+
+        // Prefer plain LaTeX/AsciiMath over large MathJax SVG payload.
+        root.querySelectorAll('latex,asciimath').forEach((mathNode) => {
+            const text = this.normalizeWhitespace(mathNode.textContent || '');
+            if (!text) {
+                mathNode.remove();
+                return;
+            }
+
+            // Wrap in $...$ to indicate math, or just return text. 
+            // Given it's from a latex tag, it's likely raw tex.
+            // Adding $ helps readability if the renderer supports Markdown/Latex, which it seems to.
+            const replacement = document.createTextNode(` $${text}$ `);
+            mathNode.replaceWith(replacement);
+        });
+
+        root.querySelectorAll('mathml,mathmlword,mjx-assistive-mml').forEach((el) => el.remove());
+
+        if (!options.preserveSvg) {
+            root.querySelectorAll('mjx-container,svg,path').forEach((el) => el.remove());
+        }
+
+        const nodes = Array.from(root.querySelectorAll('*')).reverse();
+        for (const node of nodes) {
+            const tag = node.tagName.toLowerCase();
+
+            for (const attr of Array.from(node.attributes)) {
+                const name = attr.name.toLowerCase();
+                if (
+                    name === 'href' ||
+                    name === 'src' ||
+                    name === 'alt' ||
+                    name === 'title' ||
+                    name === 'id' ||
+                    name === 'class'
+                ) {
+                    continue;
+                }
+                node.removeAttribute(attr.name);
+            }
+
+            if (!ALLOWED_TAGS.has(tag)) {
+                const fragment = document.createDocumentFragment();
+                while (node.firstChild) {
+                    fragment.appendChild(node.firstChild);
+                }
+                node.replaceWith(fragment);
+            }
+        }
+
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+            const textNode = walker.currentNode as Text;
+            textNode.textContent = this.normalizeWhitespace(textNode.textContent || ' ');
+        }
+
+        return root.innerHTML.trim();
+    }
+
+    private static detectParagraphType(
+        node: Element,
+        cleanEn: string,
+        plainEn: string
+    ): { type: ParagraphType; metadata: NonNullable<ParagraphData['metadata']> } {
+        const tag = node.tagName.toLowerCase();
+        const metadata: NonNullable<ParagraphData['metadata']> = {};
+
+        if (/^h[1-6]$/.test(tag)) {
+            return {
+                type: 'heading',
+                metadata: {
+                    headingLevel: parseInt(tag.slice(1), 10),
+                    headingId: node.id || undefined
+                }
+            };
+        }
+
+        if (tag === 'pre' || tag === 'code') {
+            return { type: 'code', metadata };
+        }
+
+        const tableElement = tag === 'table' ? node : node.querySelector('table');
+        if (tableElement) {
+            const captionText =
+                this.normalizeWhitespace(tableElement.querySelector('caption')?.textContent || '') ||
+                this.normalizeWhitespace(node.querySelector('.caption_table')?.textContent || '') ||
+                '';
+            metadata.caption = captionText;
+            return { type: 'table', metadata };
+        }
+
+        const imageElement = (tag === 'img' ? node : node.querySelector('img')) as HTMLImageElement | null;
+        if (imageElement) {
+            metadata.src = imageElement.getAttribute('src') || '';
+            metadata.alt = imageElement.getAttribute('alt') || '';
+            metadata.caption =
+                this.normalizeWhitespace(node.querySelector('figcaption')?.textContent || '') ||
+                this.normalizeWhitespace(imageElement.getAttribute('title') || '') ||
+                '';
+            return { type: 'image', metadata };
+        }
+
+        if (plainEn.length === 0 && /<img\b/i.test(cleanEn)) {
+            return { type: 'image', metadata };
+        }
+
+        return { type: 'text', metadata };
+    }
+
+    private static normalizeElementTag(tag: string, type: ParagraphType): string {
+        if (type === 'heading' && /^h[1-6]$/.test(tag)) return tag;
+        if (type === 'table') return 'table';
+        if (type === 'image') return tag === 'figure' || tag === 'picture' || tag === 'img' ? tag : 'figure';
+        if (type === 'code') return 'pre';
+        if (tag === 'li' || tag === 'blockquote' || tag === 'p') return tag;
+        return 'div';
+    }
+
+    private static resolveAssetUrl(baseUrl: string, src: string): string {
+        const normalizedSrc = src.trim();
+        if (!normalizedSrc) return src;
+
+        if (
+            normalizedSrc.startsWith('http://') ||
+            normalizedSrc.startsWith('https://') ||
+            normalizedSrc.startsWith('data:') ||
+            normalizedSrc.startsWith('blob:') ||
+            normalizedSrc.startsWith('file:') ||
+            normalizedSrc.startsWith('/')
+        ) {
+            return normalizedSrc;
+        }
+
+        if (!baseUrl) return normalizedSrc;
+
+        const normalizedBase = baseUrl.replace(/\\/g, '/');
+        const baseWithoutQuery = normalizedBase.split('?')[0].split('#')[0];
+        const slashIndex = baseWithoutQuery.lastIndexOf('/');
+        if (slashIndex < 0) return normalizedSrc;
+
+        const baseDir = baseWithoutQuery.slice(0, slashIndex + 1);
+        return `${baseDir}${normalizedSrc}`;
+    }
+
+    private static alignSentences(enHtml: string, koHtml: string): AlignedSentence[] {
+        const cleanEn = enHtml.trim();
+        const cleanKo = koHtml.trim();
+
+        if (!cleanEn && !cleanKo) return [];
+        if (!cleanKo) return [{ en: cleanEn, ko: '' }];
+        if (!cleanEn) return [{ en: cleanKo, ko: cleanKo }];
+
+        const enSentences = this.splitToPlainSentences(cleanEn);
+        const koSentences = this.splitToPlainSentences(cleanKo);
+
+        if (
+            enSentences.length > 1 &&
+            enSentences.length === koSentences.length &&
+            enSentences.length <= 20
+        ) {
+            return enSentences.map((en, idx) => ({
+                en: this.escapeHtml(en),
+                ko: this.escapeHtml(koSentences[idx] || '')
+            }));
+        }
+
+        return [{ en: cleanEn, ko: cleanKo }];
+    }
+
+    private static splitToPlainSentences(html: string): string[] {
+        const plain = this.toPlainText(html);
+        if (!plain) return [];
+
+        const regex = this.isKorean(plain)
+            ? /[^.!?\n]+[.!?]?/g
+            : /[^.!?]+[.!?]?/g;
+
+        const chunks = (plain.match(regex) || [plain])
+            .map((chunk) => this.normalizeWhitespace(chunk))
+            .filter(Boolean);
+
+        if (chunks.length === 0) return [plain];
+        return chunks;
+    }
+
+    private static extractCitations(text: string): Citation[] {
+        const citations: Citation[] = [];
+        const seen = new Set<string>();
+
+        const numericRegex = /\[(\d{1,3}(?:\s*[-,]\s*\d{1,3})*)\]/g;
+        let match: RegExpExecArray | null;
+        while ((match = numericRegex.exec(text)) !== null) {
+            const id = `[${match[1].replace(/\s+/g, '')}]`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            citations.push({ id });
+        }
+
+        const authorYearRegex = /\(([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'`\-]+(?:\s+et al\.)?,\s*(?:19|20)\d{2}[a-z]?(?:;\s*[A-Z][^)]*)*)\)/g;
+        while ((match = authorYearRegex.exec(text)) !== null) {
+            const id = `(${this.normalizeWhitespace(match[1])})`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            citations.push({ id });
+        }
+
+        return citations;
+    }
+
+    private static resolveCitationTargets(paragraphs: ParagraphData[]): void {
+        const referenceStartIndex = paragraphs.findIndex((paragraph) => {
+            if (paragraph.type !== 'heading') return false;
+            const headingText = (this.toPlainText(paragraph.enText) || this.toPlainText(paragraph.koText)).toLowerCase();
+            return headingText.includes('references') || headingText.includes('bibliography') || headingText.includes('참고문헌');
+        });
+
+        if (referenceStartIndex < 0) return;
+
+        const numericReferenceMap = new Map<string, string>();
+
+        for (let i = referenceStartIndex + 1; i < paragraphs.length; i++) {
+            const paragraph = paragraphs[i];
+            const plain = this.toPlainText(paragraph.enText) || this.toPlainText(paragraph.koText);
+            if (!plain) continue;
+
+            if (paragraph.type === 'heading' && i > referenceStartIndex + 4 && !paragraph.isReference) {
+                break;
+            }
+
+            const match = plain.match(/^\s*\[?(\d{1,3})\]?[.)]?\s+/);
+            if (match) {
+                numericReferenceMap.set(match[1], paragraph.id);
+            }
+        }
+
+        if (numericReferenceMap.size === 0) return;
+
+        for (const paragraph of paragraphs) {
+            paragraph.citations = paragraph.citations.map((citation) => {
+                const numeric = citation.id.match(/^\[(\d{1,3})(?:[-,].*)?\]$/);
+                if (!numeric) return citation;
+
+                const target = numericReferenceMap.get(numeric[1]);
+                if (!target) return citation;
+
+                return { ...citation, paragraphId: target };
+            });
+        }
+    }
+
+    private static isReferenceText(text: string): boolean {
+        const lower = text.toLowerCase();
+        return (
+            lower.includes('references') ||
+            lower.includes('bibliography') ||
+            lower.includes('참고문헌')
+        );
+    }
+
+    private static toPlainText(html: string): string {
+        if (!html) return '';
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        return this.normalizeWhitespace(div.textContent || '');
+    }
+
+    private static normalizeWhitespace(text: string): string {
+        return text.replace(/\s+/g, ' ').trim();
+    }
+
+    private static isKorean(text: string): boolean {
+        return /[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/.test(text);
+    }
+
+    private static escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     private static generateHash(text: string): string {
@@ -75,219 +760,8 @@ export class ReaderParser {
         for (let i = 0; i < text.length; i++) {
             const char = text.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
+            hash |= 0;
         }
-        return hash.toString(16);
-    }
-
-    private static splitIntoSentences(text: string): string[] {
-        const tags: string[] = [];
-        const placeholderText = text.replace(/<[^>]+>/g, (match) => {
-            tags.push(match);
-            return `__TAG_${tags.length - 1}__`;
-        });
-        const regex = /[^.!?\s][^.!?]*(?:[.!?](?!['" ]|$|[^0-9])|(?<=\d)\.(?=\d)|[^.!?])*[.!?]?['"]?(?=\s|$)/g;
-        const matches = placeholderText.match(regex);
-        if (!matches) {
-            const restored = placeholderText.replace(/__TAG_(\d+)__/g, (_, i) => tags[parseInt(i)]);
-            return [restored.trim()].filter(s => s.length > 0);
-        }
-        const refined: string[] = [];
-        matches.forEach(s => {
-            const trimmed = s.trim();
-            if (!trimmed) return;
-            const restored = trimmed.replace(/__TAG_(\d+)__/g, (_, i) => tags[parseInt(i)]);
-            const temp = document.createElement('div');
-            temp.innerHTML = restored;
-            const plain = (temp.textContent || '').trim();
-            const isMathFragment = /^[\d%\[\]\(\),. \*†‡§#=+\-<>~\\a-z]{1,5}$/i.test(plain);
-            const isKoreanParticle = /^[은는이가을를에의로과와, ]{1,3}$/.test(plain);
-            const isNoTerminatorShort = plain.length < 10 && !/[.!?]$/.test(plain);
-            if ((isMathFragment || isKoreanParticle || isNoTerminatorShort) && refined.length > 0) {
-                refined[refined.length - 1] += " " + restored;
-            } else {
-                refined.push(restored);
-            }
-        });
-        return refined;
-    }
-
-    private static alignSentences(enHtml: string, koHtml: string): AlignedSentence[] {
-        const enSentences = this.splitIntoSentences(this.cleanHtml(enHtml));
-        const koSentences = this.splitIntoSentences(this.cleanHtml(koHtml));
-        
-        // Strategy: 1:1 Mapping or Fallback
-        // If the number of sentences differs significantly (or even slightly), the naive index mapping makes the text essentially unreadable in "Korean Only" mode because specific sentences will drop to English or disappear.
-        // User Preference: "Certain 1:1 mapping" -> If we can't guarantee sentence-level 1:1, we should enforce PARAGRAPH-level 1:1.
-        // This means treating the entire paragraph content as a single "sentence" block.
-        
-        if (enSentences.length !== koSentences.length) {
-             return [{ en: this.cleanHtml(enHtml), ko: this.cleanHtml(koHtml) }];
-        }
-
-        const aligned: AlignedSentence[] = [];
-        const maxLen = Math.max(enSentences.length, koSentences.length);
-        for (let i = 0; i < maxLen; i++) {
-            aligned.push({ en: enSentences[i] || '', ko: koSentences[i] || '' });
-        }
-        return aligned;
-    }
-
-    static parse(html: string, baseUrl: string = ''): { paragraphs: ParagraphData[], structure: PaperStructure } {
-        // Optimization check - if HTML is extremely large, maybe warn or chunk?
-        // (Currently standard parse)
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        
-        // Resolve relative paths for images
-        if (baseUrl) {
-            const images = doc.querySelectorAll('img');
-            images.forEach(img => {
-                const src = img.getAttribute('src');
-                if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
-                    // Normalize base url to end with slash (remove filename)
-                    const lastSlash = baseUrl.lastIndexOf('/');
-                    const dir = lastSlash > -1 ? baseUrl.substring(0, lastSlash + 1) : baseUrl + (baseUrl ? '/' : '');
-                    img.setAttribute('src', dir + src);
-                }
-            });
-        }
-
-        const results: ParagraphData[] = [];
-        const seenHashes = new Set<string>();
-        const processedContainers = new Set<Element>();
-        
-        const toc: TocItem[] = [];
-        const figures: { id: string, desc: string }[] = [];
-        const tables: { id: string, desc: string }[] = [];
-
-        let index = 0;
-
-        const fallbackSelector = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, td, th, pre, div, img, figure, picture, table';
-
-        const pushParagraph = (element: string, enText: string, koText: string, idx: number, rawEl?: Element) => {
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = enText;
-            const plain = (tempDiv.textContent || '').trim();
-            const img = tempDiv.querySelector('img');
-
-            if (!plain && !koText.trim() && !img) return;
-
-            const rawElement = element.toLowerCase();
-            const safeElement = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'blockquote', 'figure', 'img', 'picture', 'table'].includes(rawElement)
-                ? rawElement
-                : (['td', 'th', 'tr', 'tbody', 'thead'].includes(rawElement) ? 'p' : 'div');
-
-            const hash = this.generateHash(`${plain.substring(0, 100)}-${idx}-${safeElement}`);
-            if (seenHashes.has(hash)) return;
-            seenHashes.add(hash);
-
-            // Determine Type & Metadata
-            let type: ParagraphData['type'] = 'text';
-            const metadata: ParagraphData['metadata'] = {};
-
-            if (/^h[1-6]/.test(safeElement)) {
-                type = 'heading';
-                metadata.headingLevel = parseInt(safeElement.replace('h', ''));
-                metadata.headingId = rawEl?.id || hash;
-                toc.push({ id: metadata.headingId, text: plain, level: metadata.headingLevel, paragraphId: hash });
-            } else if (['img', 'figure', 'picture'].includes(safeElement) || img) {
-                type = 'image';
-                const imageEl = img || (rawEl?.tagName === 'IMG' ? rawEl : rawEl?.querySelector('img'));
-                if (imageEl) {
-                    metadata.src = imageEl.getAttribute('src') || '';
-                    metadata.alt = imageEl.getAttribute('alt') || '';
-                }
-                const caption = rawEl?.querySelector('figcaption')?.textContent || metadata.alt;
-                metadata.caption = caption;
-                figures.push({ id: hash, desc: caption || 'Image' });
-            } else if (safeElement === 'table' || rawEl?.tagName === 'TABLE') {
-                type = 'table';
-                metadata.caption = rawEl?.querySelector('caption')?.textContent || '';
-                tables.push({ id: hash, desc: metadata.caption || 'Table' });
-            }
-
-            const sentences = this.alignSentences(enText, koText);
-            const citations: Citation[] = [];
-            
-            const citationRegex = /\[(\d+(?:,\s*\d+|-\d+)*)\]/g;
-            const citationAuthorRegex = /\((?:[A-Za-z\u00C0-\u017F\s\&\.]+,?\s*(?:19|20)\d{2}(?:;\s*)?)+\)/g;
-
-            let match;
-            while ((match = citationRegex.exec(plain)) !== null) citations.push({ id: match[0] });
-            while ((match = citationAuthorRegex.exec(plain)) !== null) citations.push({ id: match[0] });
-
-            results.push({
-                id: hash,
-                element: safeElement,
-                type,
-                metadata,
-                enText: enText.trim(),
-                koText: this.cleanHtml(koText),
-                sentences,
-                citations,
-                index: idx,
-                isReference: plain.toLowerCase().startsWith('reference') || plain.toLowerCase().includes('bibliography')
-            });
-        };
-
-        const allWrappers = Array.from(doc.querySelectorAll('.immersive-translate-target-wrapper'));
-        const translatedElements = allWrappers.filter(wrapper => {
-            let parent = wrapper.parentElement;
-            while (parent) {
-                if (parent.classList.contains('immersive-translate-target-wrapper')) return false;
-                parent = parent.parentElement;
-            }
-            return true;
-        });
-
-        if (translatedElements.length > 0) {
-            translatedElements.forEach((el) => {
-                const container = el.parentElement;
-                if (!container || processedContainers.has(container)) return;
-                
-                // Ancestry check: ensure we don't process if an ancestor is already processed
-                // However, for Immersive Translate wrappers, they are usually leaf-ish nodes.
-                // But let's be safe.
-                processedContainers.add(container);
-
-                const koElements = container.querySelectorAll('.immersive-translate-target-wrapper');
-                const koText = Array.from(koElements).map(k => k.innerHTML).join(' ');
-                
-                const clone = container.cloneNode(true) as HTMLElement;
-                clone.querySelectorAll('.immersive-translate-target-wrapper').forEach(w => w.remove());
-                const isMedia = ['img', 'figure', 'picture', 'table'].includes(container.tagName.toLowerCase());
-                const enText = isMedia ? clone.outerHTML : clone.innerHTML;
-                
-                pushParagraph(container.tagName.toLowerCase(), this.cleanHtml(enText), this.cleanHtml(koText), index++, container);
-            });
-        } else {
-            const elements = Array.from(doc.querySelectorAll(fallbackSelector));
-             // Filter: Exclude elements that are descendants of other elements in the list
-            const topLevelElements = elements.filter(el => {
-                let parent = el.parentElement;
-                while (parent) {
-                    if (elements.includes(parent)) return false;
-                    parent = parent.parentElement;
-                }
-                return true;
-            });
-
-            topLevelElements.forEach((el) => {
-                if (processedContainers.has(el)) return;
-                processedContainers.add(el);
-                const isMedia = ['img', 'figure', 'picture', 'table'].includes(el.tagName.toLowerCase());
-                const content = (isMedia ? el.outerHTML : el.innerHTML || '').trim();
-                const plain = el.textContent || '';
-                if (this.isKorean(plain)) {
-                    pushParagraph(el.tagName.toLowerCase(), content, content, index++, el);
-                } else {
-                    pushParagraph(el.tagName.toLowerCase(), content, '', index++, el);
-                }
-            });
-        }
-
-        return { paragraphs: results, structure: { toc, figures, tables } };
+        return (hash >>> 0).toString(16);
     }
 }

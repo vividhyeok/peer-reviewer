@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import parse from 'html-react-parser';
 
 import { LocalStorageManager } from '../core/LocalStorageManager';
 
@@ -46,6 +47,37 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
     const [copiedCode, setCopiedCode] = useState<string | null>(null);
     const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
     const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+    const [useExternalKnowledge, setUseExternalKnowledge] = useState(false);
+
+    // Listen for Save Trigger from Parent Sidebar
+    useEffect(() => {
+        const handleSaveTrigger = () => {
+            if (activeTab === 'chat' && messages.length > 0) {
+                 // Propagate up to App via property if available, or just use context?
+                 // Since onSaveSession is not passed directly here yet... 
+                 // Wait, App passed onSaveCurrentSession to Sidebar, but Sidebar renders this Panel.
+                 // We need to pass the messages OUT.
+                 // We'll dispatch an event back or use a prop if we update Sidebar prop passing.
+                 // Actually, simpler: Dispatch 'save-session-data' with messages
+                 window.dispatchEvent(new CustomEvent('save-session-data', { detail: { messages } }));
+            }
+        };
+        window.addEventListener('trigger-save-session', handleSaveTrigger);
+
+        const handleLoadSession = (e: any) => {
+            if (e.detail?.messages) {
+                setMessages(e.detail.messages);
+                setActiveTab('chat');
+                toast.success("Loaded conversation");
+            }
+        };
+        window.addEventListener('load-chat-session', handleLoadSession);
+
+        return () => {
+            window.removeEventListener('trigger-save-session', handleSaveTrigger);
+            window.removeEventListener('load-chat-session', handleLoadSession);
+        };
+    }, [messages, activeTab]);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const aiClientRef = useRef<MultiAIClient>(new MultiAIClient(settings.apiKeys));
@@ -53,6 +85,13 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
 
     // --- Persistence Logic ---
     useEffect(() => {
+        // 1. Reset State immediately on file switch to prevent data leakage
+        setMessages([]);
+        setThoughts([]);
+        setSummary(null);
+        setSuggestedQuestions([]);
+        setActiveTab('chat');
+        
         // Prepare key: prefer fileId, fallback to hash of text
         let key = '';
         if (fileId) {
@@ -66,25 +105,43 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         docKeyRef.current = key;
         
         const loadCache = async () => {
-            const cachedSummary = await storageManager.load(`summary_${key}`);
-            if (cachedSummary) {
-                try { setSummary(JSON.parse(cachedSummary)); } catch(e) {}
-            } else {
-                setSummary(null);
-            }
-
+             // 1. Load Suggestion Questions
             const cachedQuestions = await storageManager.load(`questions_${key}`);
             if (cachedQuestions) {
                 try { setSuggestedQuestions(JSON.parse(cachedQuestions)); } catch(e) {}
             } else {
-                setSuggestedQuestions([]);
+                // setSuggestedQuestions([]); // Already reset above
                 // Only trigger generation if we have text
                 if (documentFullText) loadSuggestions(key); 
+            }
+
+            // 2. Load Auto-Saved Chat History (Current Session)
+            const autoSavedChat = localStorage.getItem(`autosave_chat_${key}`);
+            if (autoSavedChat) {
+                try {
+                    const parsed = JSON.parse(autoSavedChat);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        setMessages(parsed);
+                    }
+                } catch(e) { console.warn("Failed to load autosaved chat", e); }
+            }
+
+            // 3. Load Summary (if explicitly saved or active)
+            const cachedSummary = await storageManager.load(`summary_${key}`);
+            if (cachedSummary) {
+                 try { setSummary(JSON.parse(cachedSummary)); } catch(e) {}
             }
         };
 
         loadCache();
     }, [fileId, documentFullText, storageManager]);
+
+    // Auto-Save Chat on Change
+    useEffect(() => {
+        if (docKeyRef.current && messages.length > 0) {
+            localStorage.setItem(`autosave_chat_${docKeyRef.current}`, JSON.stringify(messages));
+        }
+    }, [messages]);
 
     const loadSuggestions = async (key: string, force = false) => {
          // If key is not provided (legacy call), use current
@@ -125,10 +182,6 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
             if (prompt) {
                 setInput(prompt);
                 setActiveTab('chat');
-                if (autoSend) {
-                  // Signal to send
-                  setTriggerSend(Date.now());
-                }
             } else if (query) {
                 if (selection) {
                     setInput(`${query}\n\nSelected Text: "${selection}"`);
@@ -137,6 +190,10 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                 }
                 setActiveTab('chat');
             }
+
+            if (autoSend) {
+                setTriggerSend(Date.now());
+            }
         };
 
         window.addEventListener('research-agent-query', handleExternalQuery);
@@ -144,7 +201,8 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         window.addEventListener('research-agent-open', handleExternalQuery);
 
         const handleContextChange = (e: any) => {
-            setActiveContext(e.detail);
+            // Disabled Active Context auto-tracking to prevent hallucinations
+            // setActiveContext(e.detail);
         };
         window.addEventListener('research-agent-context-change', handleContextChange);
 
@@ -217,22 +275,50 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
         toast.info("새로운 대화가 시작되었습니다.");
     };
 
-    const handleSend = async () => {
-        if (!input.trim() || !documentFullText || loading) return;
+    const getSystemPrompt = () => {
+        let basePrompt = `You are an expert academic research assistant named "ScholarAI".
+Role: Help the user understand the paper.
+Language: ALWAYS respond in Korean (한국어).
+Tone: Professional, academic, yet accessible.
 
-        const userQuery = input.trim();
+Context Strategy:
+${useExternalKnowledge 
+  ? '1. You MAY use your external knowledge to explain concepts not found in the paper.\n2. Verify external facts if possible.' 
+  : '1. Answer ONLY based on the provided text excerpts. Do not hallucinate external details.\n2. If the answer is not in the text, state "논문 내용에서 찾을 수 없습니다."'}
+
+Citation Style:
+- When referring to specific parts of the paper, try to locate them conceptually (e.g., "In the Methodology section...").
+- If possible, verify your answers with the text provided below.
+
+Current Context:
+`;
+        if (activeContext) {
+            basePrompt += `\n[User is currently reading Paragraph #${activeContext.paragraphId}]\nExcerpt: "${activeContext.text}"\n`;
+        }
+
+        if (summary) {
+            basePrompt += `\nPaper Summary:\n${summary.takeaway}\n`;
+        }
+
+        return basePrompt;
+    };
+
+    const handleSend = async (overrideInput?: string) => {
+        const rawInput = typeof overrideInput === 'string' ? overrideInput : input;
+        if (!rawInput.trim() || !documentFullText || loading) return;
+
+        const userQuery = rawInput.trim();
+        // User requested to REMOVE activeContext usage to prevent hallucinations.
+        // We now only pass context if it's explicitly part of the user query (drag & drop selection).
         const userMsg: AIMessage = { 
             role: 'user', 
             content: userQuery,
-            context: activeContext ? {
-                paragraphId: activeContext.paragraphId,
-                textSnippet: activeContext.text
-            } : undefined
+            // context field removed intentionally 
         };
         
         // Optimistic update
         setMessages(prev => [...prev, userMsg]);
-        setInput('');
+        if (!overrideInput) setInput('');
         setLoading(true);
         setThoughts([]);
         setShowThoughts(true);
@@ -247,11 +333,22 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
             return;
         }
 
+        // Web Mode Optimization: Use Summary + First 30k chars instead of Deep Scan if we have a summary and external knowledge is on.
+        // This speeds up "Web" queries significantly.
+        let optimizedContext = documentFullText;
+        if (useExternalKnowledge && summary && summary.takeaway) {
+             // "Web" mode usually means user wants broad answers + quick lookup.
+             // We skip the expensive "Scanner" step in MultiAIClient by tricking it or passing a smaller context?
+             // Actually, MultiAIClient scans if text > 30k.
+             // We can pass a "Summary Context" prepended to a smaller text chunk.
+             optimizedContext = `[PRE-GENERATED SUMMARY]\n${summary.takeaway}\n\n[TEXT START]\n${documentFullText.slice(0, 15000)}`;
+        }
+
         try {
             const finalAnswer = await aiClientRef.current.orchestrate(
                 { provider: modelInfo.provider, modelId: modelInfo.id },
                 userQuery,
-                documentFullText,
+                optimizedContext,
                 (thought) => {
                     setThoughts(prev => {
                         const existing = prev.find(t => t.id === thought.id);
@@ -261,7 +358,8 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                         return [...prev, thought];
                     });
                 },
-                messages // Pass current history (excluding the new userMsg which is passed as query)
+                messages, // Pass current history (excluding the new userMsg which is passed as query)
+                useExternalKnowledge
             );
 
             setMessages(prev => [...prev, { 
@@ -294,8 +392,8 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
     };
 
     return (
-        <div className="h-full flex flex-col bg-transparent text-zinc-900 dark:text-zinc-100 overflow-hidden">
-            <div className="p-1 px-4 flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md">
+        <div className="h-full flex flex-col bg-transparent text-zinc-900 overflow-hidden">
+            <div className="p-1 px-4 flex items-center justify-between border-b border-zinc-200 bg-white/50 backdrop-blur-md">
                 <div className="flex gap-4">
                     {[
                         { id: 'chat', label: '채팅', icon: MessageSquareText },
@@ -306,7 +404,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                             onClick={() => setActiveTab(tab.id as any)}
                             className={clsx(
                                 "py-2 px-1 text-[11px] font-bold uppercase tracking-widest transition-all relative",
-                                activeTab === tab.id ? "text-blue-600 dark:text-blue-400" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-300"
+                                activeTab === tab.id ? "text-blue-600" : "text-zinc-500 hover:text-zinc-800"
                             )}
                         >
                             <div className="flex items-center gap-1.5">
@@ -320,6 +418,20 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                     ))}
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* Toggle External Knowledge */}
+                    <div className="flex items-center gap-1.5 bg-zinc-100 rounded-full pl-2 pr-1 py-0.5 mr-1 border border-zinc-200">
+                        <span className={clsx("text-[9px] font-bold tracking-tight", useExternalKnowledge ? "text-blue-600" : "text-zinc-400")}>
+                            {useExternalKnowledge ? "WEB" : "DOC"}
+                        </span>
+                        <button 
+                            onClick={() => setUseExternalKnowledge(!useExternalKnowledge)}
+                            title={useExternalKnowledge ? "외부 지식 허용됨" : "문서 내용만 사용"}
+                            className={clsx("w-6 h-3.5 rounded-full relative transition-colors shadow-inner", useExternalKnowledge ? "bg-blue-500" : "bg-zinc-300")}
+                        >
+                            <div className={clsx("absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all shadow-sm", useExternalKnowledge ? "left-3" : "left-0.5")} />
+                        </button>
+                    </div>
+
                     {activeTab === 'chat' && messages.length > 0 && (
                         <button
                             onClick={handleNewChat}
@@ -342,29 +454,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                 ) : activeTab === 'chat' ? (
                     messages.length === 0 && !loading ? (
                         <div className="py-10 space-y-6">
-                            {activeContext && (
-                                <motion.div
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    className="p-3 bg-zinc-900/50 border border-blue-500/20 rounded-xl flex items-center gap-3"
-                                >
-                                    <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                                        <Layers size={14} className="text-blue-400" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-[10px] text-blue-400 font-bold uppercase tracking-tighter">현재 섹션 문맥</p>
-                                        <p className="text-[12px] text-[var(--fg-secondary)] truncate italic">
-                                            "{activeContext.text}"
-                                        </p>
-                                    </div>
-                                    <button
-                                        onClick={() => handleSend()}
-                                        className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[10px] font-bold rounded-md transition-colors"
-                                    >
-                                        재설정
-                                    </button>
-                                </motion.div>
-                            )}
+                            {/* activeContext UI removed to prevent hallucination bias */}
                             <div className="space-y-2">
                                 <h3 className="text-lg font-bold text-[color:var(--ink)]">연구를 어떻게 도와드릴까요?</h3>
                                 <p className="text-sm text-[color:var(--muted)]">멀티 에이전트 시스템을 사용하여 논문을 검색, 추출, 분석합니다.</p>
@@ -383,7 +473,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                 {loadingSuggestions ? (
                                      <div className="space-y-3 opacity-50 animate-pulse">
                                          {[1,2,3,4].map(i => (
-                                             <div key={i} className="h-10 bg-zinc-200 dark:bg-zinc-800 rounded-xl" />
+                                             <div key={i} className="h-10 bg-zinc-200 rounded-xl" />
                                          ))}
                                      </div>
                                 ) : (suggestedQuestions.length > 0 ? suggestedQuestions : [
@@ -422,12 +512,42 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                         <div className={clsx(
                                             "max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed",
                                             m.role === 'user'
-                                                ? "bg-zinc-800 text-white rounded-br-md dark:bg-zinc-700" 
-                                                : "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-700 shadow-xl shadow-black/5 backdrop-blur-sm"
+                                                ? "bg-zinc-800 text-white rounded-br-md" 
+                                                : "bg-white text-zinc-900 border border-zinc-200 shadow-xl shadow-black/5 backdrop-blur-sm"
                                         )}>
-                                            <div className="prose dark:prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/10 prose-headings:text-zinc-900 dark:prose-headings:text-zinc-100 prose-p:text-zinc-900 dark:prose-p:text-zinc-100">
+                                            <div className="prose prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-white/10 prose-headings:text-zinc-900 prose-p:text-zinc-900">
+                                                {m.content.trim().startsWith('<abbr') ? (
+                                                    <div>{parse(m.content)}</div>
+                                                ) : (
                                                 <ReactMarkdown
                                                     components={{
+                                                        a: ({ href, children, ...props }: any) => {
+                                                            if (href?.startsWith('citation:')) {
+                                                                const id = href.replace('citation:', '');
+                                                                return (
+                                                                    <button 
+                                                                        onClick={(e) => { 
+                                                                            e.preventDefault(); 
+                                                                            // Direct DOM manipulation for jump - reusing logic
+                                                                            const el = document.getElementById(`para-${id}`);
+                                                                            if (el) {
+                                                                                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                                 el.classList.add('ring-4', 'ring-blue-500/50', 'bg-blue-500/10');
+                                                                                 setTimeout(() => el.classList.remove('ring-4', 'ring-blue-500/50', 'bg-blue-500/10'), 2000);
+                                                                            } else {
+                                                                                toast.error(`Source paragraph not found: ${id}`);
+                                                                            }
+                                                                        }} 
+                                                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-1 bg-blue-100 text-blue-700 rounded text-[10px] font-bold hover:bg-blue-200 transition-colors align-middle"
+                                                                        title="Go to source"
+                                                                    >
+                                                                        <BookOpen size={10} />
+                                                                        {children}
+                                                                    </button>
+                                                                );
+                                                            }
+                                                            return <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">{children}</a>;
+                                                        },
                                                         code: ({ className, children, ...props }: any) => {
                                                             const match = /language-(\w+)/.exec(className || '');
                                                             const codeContent = String(children).replace(/\n$/, '');
@@ -459,37 +579,85 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                                 >
                                                     {m.content}
                                                 </ReactMarkdown>
+                                                )}
 
                                                 
                                                 {m.role === 'assistant' && (
-                                                    <div className="flex items-center gap-2 mt-4 pt-4 border-t border-zinc-200/50 dark:border-zinc-700/50">
+                                                    <div className="flex items-center gap-2 mt-3 pt-2 border-t border-zinc-100">
+                                                        {/* 1. Regenerate */}
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                // Trigger last query again (Naive implementation)
+                                                                const lastUserMsg = messages.slice(0, messages.indexOf(m)).reverse().find(msg => msg.role === 'user');
+                                                                if (lastUserMsg) {
+                                                                    handleSend(lastUserMsg.content); // Re-send
+                                                                } else {
+                                                                    toast.error("원문 질문을 찾을 수 없습니다");
+                                                                }
+                                                            }}
+                                                            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors"
+                                                            title="답변 재생성"
+                                                        >
+                                                            <RotateCw size={14} />
+                                                        </button>
+
+                                                        {/* 2. Copy */}
                                                         <button 
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                if (onSaveNote && activeContext) {
+                                                                navigator.clipboard.writeText(m.content);
+                                                                toast.success("복사되었습니다");
+                                                            }}
+                                                            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors"
+                                                            title="복사"
+                                                        >
+                                                            <Copy size={14} />
+                                                        </button>
+
+                                                        {/* 3. Save Note */}
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                // Use message context if available, otherwise active selection context
+                                                                const targetContext = m.context || activeContext || {
+                                                                    paragraphId: 'global',
+                                                                    textHash: 'global',
+                                                                    startOffset: 0,
+                                                                    endOffset: 0,
+                                                                    selectedText: 'General Conversation'
+                                                                };
+                                                                
+                                                                if (onSaveNote) {
+                                                                    // Polymorphic access to text property
+                                                                    const sourceText = 'selectedText' in targetContext 
+                                                                        ? targetContext.selectedText
+                                                                        : ('textSnippet' in targetContext 
+                                                                            ? (targetContext as any).textSnippet 
+                                                                            : (targetContext as any).text);
+
                                                                     onSaveNote({
                                                                         id: crypto.randomUUID(),
                                                                         type: 'ai_response',
                                                                         content: m.content,
                                                                         createdAt: Date.now(),
                                                                         target: {
-                                                                            paragraphId: m.context?.paragraphId || activeContext.paragraphId,
+                                                                            paragraphId: targetContext.paragraphId || 'global',
                                                                             textHash: 'ai',
                                                                             startOffset: 0, 
                                                                             endOffset: 0,
-                                                                            selectedText: m.context?.textSnippet || activeContext.text
+                                                                            selectedText: sourceText || "Saved Response" 
                                                                         }
                                                                     });
                                                                     toast.success("Saved to Notebook");
                                                                 } else {
-                                                                    toast.error("Set context first by selecting text");
+                                                                    toast.error("저장 기능이 연결되지 않았습니다.");
                                                                 }
                                                             }}
-                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
-                                                            title="Save to Notebook with Context"
+                                                            className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                                                            title="Save Note"
                                                         >
-                                                            <BookOpen size={12} />
-                                                            SAVE NOTE
+                                                            <BookOpen size={14} />
                                                         </button>
                                                         
                                                         {m.context?.paragraphId && (
@@ -498,7 +666,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                                                     const el = document.getElementById(`para-${m.context?.paragraphId}`);
                                                                     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                                                 }}
-                                                                className="flex items-center gap-1.5 px-3 py-1.5 text-zinc-500 dark:text-zinc-400 text-[10px] font-bold rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                                                className="flex items-center gap-1.5 px-3 py-1.5 text-zinc-500 text-[10px] font-bold rounded-lg hover:bg-zinc-100 transition-colors"
                                                             >
                                                                 <Layers size={12} />
                                                                 JUMP TO SOURCE
@@ -598,12 +766,22 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                             { label: '한계점', content: summary.limitations, icon: ShieldAlert }
                                         ].map(item => item.content && (
                                             <div key={item.label} className="space-y-1.5">
-                                                <h5 className="text-[9px] font-black text-[var(--fg-tertiary)] uppercase tracking-tighter flex items-center gap-2">
-                                                    <item.icon size={10} /> {item.label}
+                                                <h5 className="text-[10px] font-bold text-[var(--fg-tertiary)] uppercase tracking-wide flex items-center gap-2">
+                                                    <item.icon size={11} /> {item.label}
                                                 </h5>
-                                                <p className="text-[13px] leading-relaxed text-[var(--fg-secondary)] whitespace-pre-wrap">
-                                                    {item.content}
-                                                </p>
+                                                <div className="text-[13px] leading-relaxed text-[var(--fg-secondary)]">
+                                                    {/* Enforce clean bullet points and consistent font size */}
+                                                    <ReactMarkdown 
+                                                        components={{
+                                                            p: ({node, ...props}) => <p className="mb-0" {...props} />,
+                                                            ul: ({node, ...props}) => <ul className="list-disc pl-4 space-y-1" {...props} />,
+                                                            li: ({node, ...props}) => <li className="marker:text-[var(--accent)]" {...props} />,
+                                                            strong: ({node, ...props}) => <span className="font-semibold text-[var(--fg-primary)]" {...props} />
+                                                        }}
+                                                    >
+                                                        {item.content}
+                                                    </ReactMarkdown>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -634,7 +812,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                                     {annotations.map(a => (
                                         <div
                                             key={a.id}
-                                            className="p-3 bg-zinc-900 border border-[var(--border)] rounded-xl group cursor-pointer hover:border-[var(--accent)]/50 transition-all"
+                                            className="p-3 bg-white border border-[var(--border)] rounded-xl group cursor-pointer hover:border-[var(--accent)]/50 transition-all shadow-sm"
                                             onClick={() => {
                                                 const el = document.getElementById(`para-${a.target.paragraphId}`);
                                                 if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -684,7 +862,7 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
                             }}
                         />
                         <button
-                            onClick={handleSend}
+                            onClick={() => handleSend()}
                             disabled={!input.trim() || !documentFullText || loading}
                             className="absolute right-2 p-2 bg-[var(--accent)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 shadow-lg shadow-blue-500/20 transition-all active:scale-95"
                         >

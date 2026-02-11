@@ -36,7 +36,10 @@ export type ActionType =
   | 'ai-discuss-end'
   | 'toggle-translation'
   | 'next-highlight'
-  | 'prev-highlight';
+  | 'prev-highlight'
+  | 'undo'
+  | 'redo'
+  | 'search';
 
 export type Shortcut = {
   action: ActionType;
@@ -56,6 +59,9 @@ export const DEFAULT_SHORTCUTS: Shortcut[] = [
   { action: 'toggle-translation', keys: 'Alt+T', description: 'Toggle EN/KO for paragraph' },
   { action: 'next-highlight', keys: 'Alt+ArrowDown', description: 'Navigate to next highlight' },
   { action: 'prev-highlight', keys: 'Alt+ArrowUp', description: 'Navigate to previous highlight' },
+  { action: 'undo', keys: 'Ctrl+Z', description: 'Undo last action' },
+  { action: 'redo', keys: 'Ctrl+Shift+Z', description: 'Redo last action' },
+  { action: 'search', keys: 'Alt+F', description: 'Search in document' },
 ];
 
 export type AIFeature =
@@ -85,9 +91,16 @@ export interface AppSettings {
   // UI Preferences
   isKoreanPrimary: boolean;
   theme: 'light' | 'dark';
+  uiZoom: number;
+  sidebarWidths: {
+    left: number;
+    right: number;
+  };
   defaultLanguage: 'en' | 'ko';
   highlightColors: string[];
   autoSaveInterval: number; // seconds
+  dataRootPath?: string; // Optional user-defined root path
+  setupCompleted?: boolean; // Whether the initial setup (storage selection) is done
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -106,8 +119,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   shortcuts: DEFAULT_SHORTCUTS,
   isKoreanPrimary: true,
-  theme: 'dark',
+  theme: 'light',
+  uiZoom: 1.0,
+  sidebarWidths: {
+    left: 450,
+    right: 450
+  },
   defaultLanguage: 'en',
   highlightColors: ['#fef08a', '#86efac', '#93c5fd', '#f9a8d4', '#fdba74'],
   autoSaveInterval: 30,
+  dataRootPath: '',
+  setupCompleted: false,
 };

@@ -8,34 +8,7 @@
   --font-sans: "Inter", "Pretendard", sans-serif;
   --line-height: 1.7;
 
-  /* Default Dark Theme (Zinc) */
-  --bg-app: #09090b;
-  --bg-panel: #18181b;
-  --bg-element: #27272a;
-  --bg-hover: #3f3f46;
-  --bg-tooltip: #18181b;
-
-  --border: #27272a;
-
-  --fg-primary: #f4f4f5;
-  --fg-secondary: #a1a1aa;
-  --fg-tertiary: #52525b;
-
-  --accent: #3b82f6;
-  --accent-dim: #1d4ed8;
-  --accent-glow: rgba(59, 130, 246, 0.15);
-  --glass-bg: rgba(24, 24, 27, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  
-  --bg-primary-950: #09090b;
-  --bg-secondary-900: #18181b;
-  --bg-tertiary-800: #27272a;
-  
-  --text-primary-100: #f4f4f5;
-  --text-secondary-400: #a1a1aa;
-}
-
-[data-theme='light'] {
+  /* Default Light Theme */
   --bg-app: #ffffff;
   --bg-panel: #f8f9fa;
   --bg-element: #f1f5f9;
@@ -62,6 +35,8 @@
   --text-secondary-400: #64748b;
 }
 
+/* Removed Dark Mode Block */
+
 body {
   margin: 0;
   background-color: var(--bg-app);
@@ -80,10 +55,12 @@ body {
   max-width: var(--reader-max-width);
   margin: 0 auto;
   padding: 120px 48px;
-  font-size: 17.5px; /* Increased legibility */
+  font-size: 18px; /* Increased legibility */
+  font-weight: 500; /* Slightly thicker text */
   font-family: var(--font-serif);
   text-align: justify; /* Paper-like layout */
   hyphens: auto;       /* Better spacing */
+  color: var(--fg-primary);
 }
 
 /* Subtle Header Styles */
@@ -95,7 +72,7 @@ body {
   line-height: 1.4;
   margin-top: 1.8em;
   margin-bottom: 0.6em;
-  color: #e4e4e7;
+  color: var(--fg-primary);
   letter-spacing: -0.01em;
 }
 
@@ -112,7 +89,7 @@ body {
 
 .reader-content h3 {
   font-size: 1.15em;
-  color: #d4d4d8;
+  color: var(--fg-secondary);
 }
 
 /* Paragraph Flow */
@@ -192,7 +169,7 @@ html,
 
 /* Paper visual enhancements */
 .paper-mode {
-  background: linear-gradient(to bottom, var(--bg-app) 0%, rgba(24, 24, 27, 0.8) 100%);
+  background: var(--bg-app);
 }
 
 /* Utility Animations */

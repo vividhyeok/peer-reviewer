@@ -227,24 +227,33 @@ export class MultiAIClient {
     throw new Error("Failed to extract and parse JSON response");
   }
 
-  // --- Agent Orchestration (Phase 7) ---
+  // --- Agent Orchestration (Reliable Plan-and-Solve) ---
+
+  private getEfficientModel(provider: AIProvider, currentModel: string): string {
+    if (provider === 'openai') {
+       if (currentModel.includes('gpt-4')) return 'gpt-4o-mini';
+    }
+    if (provider === 'gemini') {
+       // All Gemini models in this app are likely capable, but Flash is the scanner.
+       return 'gemini-1.5-flash';
+    }
+    // DeepSeek is already efficient/cheap.
+    return currentModel;
+  }
 
   async orchestrate(
     modelInfo: { provider: AIProvider; modelId: string },
     query: string,
     documentText: string,
     onThought: (thought: AgentThought) => void,
-    chatHistory: AIMessage[] = []
+    chatHistory: AIMessage[] = [],
+    useExternalKnowledge: boolean = false
   ): Promise<string> {
     const session: AgentSession = {
       id: crypto.randomUUID(),
       query,
       thoughts: []
     };
-
-    // Analyze user intent for output format
-    const requiresMarkdown = /마크다운|markdown|md|코드블록|code\s*block/i.test(query);
-    const requiresSummary = /정리|요약|summary|summarize/i.test(query);
 
     const addThought = (type: AgentTaskType, message: string) => {
       const thought: AgentThought = {
@@ -265,162 +274,117 @@ export class MultiAIClient {
     };
 
     try {
-      // Step 0: Advanced Intent & Style Routing
-      // We need to classify the user's need into specific buckets to avoid "over-engineering" simple requests.
-      const routingThought = addThought('analyze', 'Analyzing request intent...');
-      
-      const routerPrompt = `Analyze the user query and strictly classify it into one of these intents:
-      
-      1. "chat": Casual discussion, follow-up questions, simple debates, subjective opinions. (Lightweight)
-      2. "explain_compact": Asking for examples, clarifying a concept, "what does this mean?", "give me an analogy". (Lightweight)
-      3. "summary_3lines": "3줄 요약해줘", "tl;dr", "brief summary", "gist". (Lightweight)
-      4. "summary_obsidian": "Markdown summary", "detailed summary", "summarize for obsidian", "structure note". (Heavy)
-      5. "deep_analysis": "Critique this", "Analyze limitations", "methodology review", "future work", complex research tasks. (Heavy)
+      const lastMsg = chatHistory[chatHistory.length - 1];
+      const focusedContext = lastMsg?.context;
 
-      Return ONLY JSON: { "intent": "chat" | "explain_compact" | "summary_3lines" | "summary_obsidian" | "deep_analysis" }`;
-      
-      let intent = 'deep_analysis';
-      try {
-        const routeRes = await this.sendMessage(modelInfo.provider, modelInfo.modelId, [
-          { role: 'system', content: "You are a semantic intent classifier. Output JSON only." }, 
-          { role: 'user', content: routerPrompt }
-        ], { temperature: 0.1 });
-        const routeData = this.extractJson(routeRes.content);
-        intent = routeData.intent || 'deep_analysis';
-        updateThought(routingThought, `Identified intent: ${intent}`);
-      } catch (e) {
-        console.warn("Routing failed, defaulting to deep_analysis", e);
-        updateThought(routingThought, "Routing failed, proceeding with deep analysis", 'failed');
+      // START LOGIC
+      // 1. Local/Specific Query? (If user selected text, skip the scanner)
+      if (focusedContext && focusedContext.textSnippet) {
+           const solveThought = addThought('analyze', 'Analyzing selected specific context...');
+           
+           const systemPrompt = `
+You are a Context-Aware Research Assistant.
+Protocol:
+1. Answer based on the provided context if possible.
+2. [DEFINITION EXCEPTION] If the user asks for a definition of a term (e.g. "What is X?") that is mentioned but not defined in the text, YOU MAY use general knowledge to explain it briefly. Explicitly state if you are using general knowledge.
+${useExternalKnowledge ? '3. [ENABLED] You may use external knowledge to verify or explain concepts.' : '3. [RESTRICTED] Ideally use only the text. If answer is missing, follow Protocol #2 or state it is not in the text.'}
+4. Answer in Korean (한국어).
+
+[FOCUS PARAGRAPH]
+"${focusedContext.textSnippet}"
+`;
+           const messages: AIMessage[] = [
+               { role: 'system', content: systemPrompt },
+               ...chatHistory.slice(0, -1),
+               { role: 'user', content: `Query: ${query}` }
+           ];
+
+           const response = await this.sendMessage(modelInfo.provider, modelInfo.modelId, messages, { temperature: 0.3 });
+           updateThought(solveThought, "Done");
+           return response.content;
       }
 
-      // --- Fast Track (Non-Agent) Paths ---
-      // For these intents, we skip the Planner/Agent loop to be fast and conversational.
-      if (['chat', 'explain_compact', 'summary_3lines'].includes(intent)) {
-         
-         const fastThought = addThought('search', 'Generating quick response...');
+      // 2. Global Query? (Full Document Scan)
+      // Use "Efficient Model" to scan the potentially huge document first.
+      
+      const cheapModelId = this.getEfficientModel(modelInfo.provider, modelInfo.modelId);
+      const isUsingScanner = cheapModelId !== modelInfo.modelId;
+      
+      let relevantContext = "";
+      
+      if (isUsingScanner) {
+          const scanThought = addThought('search', `Scanning document with fast agent (${cheapModelId})...`);
+          
+          // Scanner Prompt
+          const scannerPrompt = `
+User Query: "${query}"
 
-         // Model Personality Normalization (The "GPT-4o-mini" Filter)
-         // DeepSeek and Gemini Flash tend to be verbose. We enforce brevity.
-         let styleInstruction = "Answer directly and concisely. Avoid filler phrases like 'Here is the explanation'. Use plain Korean (한국어).";
-         
-         if (intent === 'summary_3lines') {
-            styleInstruction = "Provide exactly 3 bullet points. No intro, no outro. Just the facts. (한국어로 작성)";
-         } else if (intent === 'chat') {
-            styleInstruction = "Engage in a natural, intellectual conversation. Be sharp and direct. Don't lecture the user. If they disagree, debate constructively. (한국어로 작성)";
-         } else if (intent === 'explain_compact') {
-            styleInstruction = "Explain the concept simply using an analogy or standard example. Keep it under 200 words if possible. (한국어로 작성)";
-         }
+Task: You are a Research Scout. Scan the full document text below and EXTRACT the specific sections/paragraphs that contain the answer to the user's query.
+- Copy relevant sentences verbatim.
+- **IMPORTANT**: The text contains [[ID:para-...]] markers. YOU MUST PRESERVE THESE MARKERS in your extraction to allow citation.
+- If the whole paper is relevant (e.g. "Summarize paper"), output "ALL_BUT_SUMMARIZED".
+- If the answer is NOT found, say "NOT_FOUND".
 
-         // Anti-Verbosity Injection for "Talkative" Models
-         if (['deepseek', 'gemini'].includes(modelInfo.provider)) {
-            styleInstruction += "\n\nCRITICAL INSTRUCTION: Be extremely concise. Do not repeat the user's question. Do not start with 'Sure, I can help'. Mimic the brevity of GPT-4o-mini.";
-         }
+[FULL DOCUMENT TEXT]
+${documentText.slice(0, 80000)} ${documentText.length > 80000 ? '...(truncated)' : ''}
+`;
+          // We use the cheap model for this heavy lifting
+          const scanResponse = await this.sendMessage(modelInfo.provider, cheapModelId, [
+              { role: 'user', content: scannerPrompt }
+          ], { temperature: 0.1 });
 
-         const fastResponse = await this.sendMessage(modelInfo.provider, modelInfo.modelId, [
-             { role: 'system', content: `You are an intelligent research assistant. ${styleInstruction}` },
-             // Pass history for chat continuity
-             ...chatHistory,
-             { role: 'user', content: `Document Context:\n${documentText.slice(0, 15000)}\n\nUser Query: ${query}` }
-         ]);
-         
-         updateThought(fastThought, "Done.");
-         return fastResponse.content;
+          relevantContext = scanResponse.content;
+          updateThought(scanThought, "Relevant context extracted.", 'completed');
+      } else {
+          // If already using a fast model (like DeepSeek), just use the first 30k chars
+          relevantContext = documentText.slice(0, 30000); 
       }
 
-      // --- Heavy Agent Paths (summary_obsidian, deep_analysis) ---
-
-      // Step 1: Planning (Complex Path)
-      const planThought = addThought('analyze', `Structuring complex research task (${intent})...`);
+      // 3. Final Synthesis (Smart Model)
+      const synthThought = addThought('synthesize', 'Formulating final answer...');
       
-      // Context from history
-      const historyContext = chatHistory.length > 0 
-        ? `Previous Conversation Context:\n${chatHistory.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n').slice(-3000)}\n\n`
-        : "";
-
-      const plannerPrompt = `You are a Research Architect. Break down this user query into 1-3 concrete sub-tasks.
-      Available Tools:
-      - search: Search for real-world context/applications outside the paper.
-      - extract: Find and format specific data/facts into Markdown code blocks.
-      - author-sim: Roleplay as the author to explain the "why".
-      - analyze: Perform deep technical analysis of the paper content.
-      - critic: Rigorously challenge the methodology, assumptions, and results. Identify missing citations or potential biases.
-      - hypothesize: Propose 3-5 concrete "Future Work" or "Next Step" research directions based on findings.
-
-      ${historyContext}
-      User Query: "${query}"
-
-      Return ONLY a JSON array: [{ "tool": "search" | "extract" | "author-sim" | "analyze", "goal": "..." }]
-      IMPORTANT: All sub-goals and reasoning must be in Korean (한국어로 작성).`;
-
-      // Gemini Fix: Ensure there is a User message. Putting prompt in User message is safer for "chat" endpoints.
-      const planResponse = await this.sendMessage(modelInfo.provider, modelInfo.modelId, [
-        { role: 'system', content: "You represent a JSON-speaking planning module." },
-        { role: 'user', content: plannerPrompt }
-      ], { temperature: 0.1 });
-
-      let plan: any[] = [];
-      try {
-        plan = this.extractJson(planResponse.content);
-        if (!Array.isArray(plan)) plan = [];
-      } catch (e) {
-         console.warn("Plan parsing failed, falling back to basic analysis");
-         plan = [{ tool: 'analyze', goal: 'Analyze the document to answer the user query' }];
+      let contextForFinal = relevantContext;
+      if (relevantContext.includes("ALL_BUT_SUMMARIZED")) {
+          // If scanner said "It's everything", we fall back to the first 30-50k chars for the main model
+          contextForFinal = documentText.slice(0, 40000); 
       }
 
-      updateThought(planThought, `Plan created: ${plan.length} steps.`);
+      const finalSystemPrompt = `
+You are an Advanced Research Agent.
+Goal: Answer the user's query accurately using the provided [RELEVANT CONTEXT].
 
-      // Step 2: Execution
-      const results: string[] = [];
-      for (const step of plan) {
-        const stepThought = addThought(step.tool, step.goal);
+Instructions:
+1. **Evidence-Based**: ${useExternalKnowledge ? 'Prioritize the provided context, but you MAY use general knowledge to explain concepts not fully defined in the text.' : 'Use ONLY the provided context. If the answer is not in the text, explicitly state that.'}
+2. **Web Mode Optimization**: ${useExternalKnowledge ? 'If the context provided is a SUMMARY, rely on your internal knowledge + summary to answer quickly.' : 'Deeply analyze the text snippets.'}
+3. **Citation**: 
+   - The context contains [[ID:para-...]] markers. 
+   - cite your sources using [Ref](citation:para-ID).
+   - **Visual Cleanliness**: If multiple consecutive items come from the SAME paragraph, do NOT repeat the [Ref] for every item. Instead, cite it once at the end of the list or group.
+   - Example: 
+     * Item A
+     * Item B
+     * Item C
+     [Ref](citation:para-123)
+4. **Language**: Answer in Korean (한국어).
+5. **Style**: Direct, Academic, Insightful.
 
-        let systemPrompt = "";
-        if (step.tool === 'author-sim') {
-          systemPrompt = "You are the primary author of the paper below. Answer questions with the confidence, nuance, and perspective of the researcher who wrote it. Justify your choices. Always respond in Korean (한국어로 답변하세요).";
-        } else if (step.tool === 'extract') {
-          systemPrompt = "You are a data extraction specialist. Extract the requested information and format it in Clean Markdown Code Blocks. Provide a brief rationale for each block. Always respond in Korean (한국어로 답변하세요).";
-        } else if (step.tool === 'search') {
-          systemPrompt = "You are a field researcher. Contextualize the paper's findings within the current 2024-2025 state of the industry/field. Use your internal knowledge as the 'search tool'. Always respond in Korean (한국어로 답변하세요).";
-        } else if (step.tool === 'critic') {
-          systemPrompt = "You are a Rigorous Peer Reviewer. Your goal is to find holes. Challenge the experimental setup, the statistical significance, the generalizability of results, and the logical leaps between the data and conclusions. Be critical but constructive. Always respond in Korean (한국어로 답변하세요).";
-        } else if (step.tool === 'hypothesize') {
-          systemPrompt = "You are a Research Visionary. Based on the paper's contributions, propose the 'next big thing'. What are the logical extensions? What industries could this transform? Propose concrete, testable hypotheses for follow-up studies. Always respond in Korean (한국어로 답변하세요).";
-        } else {
-          systemPrompt = "Perform high-level academic analysis of the paper text provided. Always respond in Korean (한국어로 답변하세요).";
-        }
+[RELEVANT CONTEXT (Extracted from Paper)]
+${contextForFinal}
+`;
 
-        const stepResponse = await this.sendMessage(modelInfo.provider, modelInfo.modelId, [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Goal: ${step.goal}\n\nDocument Context:\n${documentText.slice(0, 8000)}` }
-        ]);
+      const response = await this.sendMessage(modelInfo.provider, modelInfo.modelId, [
+          { role: 'system', content: finalSystemPrompt },
+          ...chatHistory.slice(0, -1),
+          { role: 'user', content: query }
+      ], { temperature: 0.3 });
 
-        results.push(`[${step.tool.toUpperCase()}] ${stepResponse.content}`);
-        updateThought(stepThought, "Step completed.");
-      }
+      updateThought(synthThought, "Complete");
+      return response.content;
 
-      // Step 3: Synthesis
-      const synthThought = addThought('synthesize', 'Synthesizing all research findings...');
-      
-      let synthSystemPrompt = "You are the Lead Researcher. Synthesize the sub-agent outputs into a final, comprehensive answer for the user. PLEASE RESPOND IN KOREAN (한국어로 상세히 답변하세요).";
-      
-      // Add format guidance based on user intent
-      if (requiresMarkdown) {
-        synthSystemPrompt += "\n\n**IMPORTANT**: The user requested structured markdown output. Format your response with proper markdown syntax including:\n- Headers (##, ###)\n- Code blocks (```language)\n- Bullet points and numbered lists\n- Bold/italic emphasis\n- Tables if applicable\nProvide a well-organized, structured document.";
-      } else if (requiresSummary) {
-        synthSystemPrompt += "\n\n**IMPORTANT**: The user requested a summary. Provide a concise, conversational summary in plain text (not heavily structured markdown). Focus on key insights and main points in 2-3 paragraphs.";
-      }
-      
-      const synthResponse = await this.sendMessage(modelInfo.provider, modelInfo.modelId, [
-        { role: 'system', content: synthSystemPrompt },
-        { role: 'user', content: `Original Query: ${query}\n\nAgent Findings:\n${results.join('\n\n')}` }
-      ]);
-
-      updateThought(synthThought, "Synthesis complete.");
-      return synthResponse.content;
-
-    } catch (e) {
-      console.error('Orchestration failed', e);
-      throw e;
+    } catch (e: any) {
+      console.error("Orchestration failed", e);
+      addThought('critic', `Error: ${e.message}`);
+      return "죄송합니다. 처리 중 오류가 발생했습니다. (API Error)";
     }
   }
 
@@ -678,9 +642,9 @@ Always respond in Korean (한국어로 답변하세요).`
         content: `You are a high-level research synthesizer. 
 Analyze the paper and provide a structured summary in KOREAN.
 1. Return ONLY a JSON object: { "takeaway": "...", "objective": "...", "methodology": "...", "results": "...", "limitations": "..." }
-2. For EACH field, use a bulleted list format starting with '-'.
-3. If there are multiple sentences or points, split them into separate '-' bullets.
-4. Use hierarchical depth (indentation) if necessary for sub-details.
+2. For EACH field (objective, methodology, results, limitations), provide EXACTLY 4 key points.
+3. Start each point with '- '. Do not use Markdown headers (#).
+4. Keep the font size consistent by avoiding complex formatting.
 5. ALL TEXT VALUES MUST BE IN KOREAN (요약 내용은 반드시 한국어로 작성하세요).`
       },
       { role: 'user', content: fullText.slice(0, 20000) }
@@ -704,12 +668,10 @@ Analyze the paper and provide a structured summary in KOREAN.
   async repairParagraph(
     modelInfo: { provider: AIProvider; modelId: string },
     enText: string,
-    koText: string
+    koText: string,
+    instruction?: string
   ): Promise<{ en: string; ko: string }> {
-    const messages: AIMessage[] = [
-      {
-        role: 'system',
-        content: `You are a precision text repair specialist.
+    const basePrompt = `You are a precision text repair specialist.
 The input text has parsing artifacts:
 1. Inline math formulas/SVG paths may appear as "M123 456..." strings.
 2. Citation tags may be broken (e.g., "[ 1 2 ]").
@@ -719,7 +681,16 @@ Task:
 1. Reconstruct the broken text into clean, readable Markdown/Latex ($...$) or plain text.
 2. If you see SVG path data (e.g., "M 32 4..."), replace it with a placeholder like "[Equation]" or reconstruct the math if obvious.
 3. Fix mangled numbers/dates (e.g., "2 0 2 4" -> "2024").
-4. Return ONLY a JSON object: { "en": "...", "ko": "..." }`
+4. Return ONLY a JSON object: { "en": "...", "ko": "..." }`;
+
+    const specificInstruction = instruction 
+       ? `\n\nSPECIAL INSTRUCTION: ${instruction}\nIf you need to output a Table, use Markdown Table syntax or HTML Table.`
+       : '';
+
+    const messages: AIMessage[] = [
+      {
+        role: 'system',
+        content: basePrompt + specificInstruction
       },
       {
         role: 'user',

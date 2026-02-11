@@ -43,29 +43,29 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-white/90 dark:bg-zinc-950/90 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-white/90 backdrop-blur-sm p-4">
       <div className="w-full max-w-xl flex flex-col items-center">
         
         {/* Header */}
         <div className="w-full flex items-center justify-between mb-8">
-            <div className="flex items-center gap-3 text-white">
-                <div className="p-2 bg-purple-500/20 rounded-lg">
-                    <Brain className="text-purple-400" size={24} />
+            <div className="flex items-center gap-3 text-zinc-900">
+                <div className="p-2 bg-purple-500/10 rounded-lg">
+                    <Brain className="text-purple-600" size={24} />
                 </div>
                 <div>
                     <h2 className="text-xl font-bold">Concept Review</h2>
-                    <p className="text-zinc-400 text-sm">
+                    <p className="text-zinc-500 text-sm">
                         {cards.length > 0 ? `${currentIndex + 1} of ${cards.length} cards` : 'No concepts found'}
                     </p>
                 </div>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 hover:text-white transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-zinc-100 rounded-full text-zinc-400 hover:text-zinc-600 transition-colors">
                 <X size={24} />
             </button>
         </div>
 
         {cards.length === 0 ? (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-12 text-center">
+            <div className="bg-zinc-50 border border-zinc-200 rounded-2xl p-12 text-center">
                 <p className="text-zinc-500 text-lg">No definitions or questions found to review.</p>
                 <p className="text-zinc-600 text-sm mt-2">Use the AI "Define" tool or add Questions highlights context.</p>
             </div>
@@ -78,11 +78,11 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ isOpen, onClos
                         animate={{ rotateY: isFlipped ? 180 : 0 }}
                     >
                         {/* Front */}
-                        <div className="absolute inset-0 backface-hidden bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700/50 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 text-center group hover:border-blue-500/30 transition-colors">
-                            <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-4 bg-zinc-100 dark:bg-zinc-950/50 px-3 py-1 rounded-full">
+                        <div className="absolute inset-0 backface-hidden bg-white border border-zinc-200 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 text-center group hover:border-blue-500/30 transition-colors">
+                            <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-4 bg-zinc-100 px-3 py-1 rounded-full">
                                 {currentCard.type === 'definition' ? 'Term' : 'Context'}
                             </span>
-                            <h3 className="text-3xl font-bold text-zinc-900 dark:text-white mb-6 leading-tight">
+                            <h3 className="text-3xl font-bold text-zinc-900 mb-6 leading-tight">
                                 {currentCard.front}
                             </h3>
                             <span className="text-zinc-500 text-sm opacity-50 group-hover:opacity-100 transition-opacity">
@@ -91,11 +91,11 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ isOpen, onClos
                         </div>
 
                         {/* Back */}
-                        <div className="absolute inset-0 backface-hidden bg-zinc-50 dark:bg-zinc-800 border-2 border-purple-500/20 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 text-center rotate-y-180">
-                            <span className="text-xs font-mono uppercase tracking-widest text-purple-600 dark:text-purple-400 mb-4 bg-purple-500/10 px-3 py-1 rounded-full">
+                        <div className="absolute inset-0 backface-hidden bg-zinc-50 border-2 border-purple-500/20 rounded-2xl shadow-2xl flex flex-col items-center justify-center p-8 text-center rotate-y-180">
+                            <span className="text-xs font-mono uppercase tracking-widest text-purple-600 mb-4 bg-purple-500/10 px-3 py-1 rounded-full">
                                 {currentCard.type === 'definition' ? 'Definition' : 'My Question'}
                             </span>
-                            <p className="text-lg text-zinc-700 dark:text-zinc-200 leading-relaxed max-h-[80%] overflow-y-auto">
+                            <p className="text-lg text-zinc-700 leading-relaxed max-h-[80%] overflow-y-auto">
                                 {currentCard.back}
                             </p>
                         </div>
@@ -104,16 +104,16 @@ export const FlashcardReview: React.FC<FlashcardReviewProps> = ({ isOpen, onClos
 
                 {/* Controls */}
                 <div className="flex items-center gap-6 mt-8">
-                    <button onClick={handlePrev} className="p-4 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-white transition-all">
+                    <button onClick={handlePrev} className="p-4 rounded-full bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-600 transition-all">
                         <ChevronLeft size={24} />
                     </button>
                     
-                    <button onClick={() => setIsFlipped(!isFlipped)} className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium transition-all shadow-lg shadow-blue-900/20">
+                    <button onClick={() => setIsFlipped(!isFlipped)} className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-medium transition-all shadow-lg shadow-blue-500/20">
                         <RefreshCw size={18} className={isFlipped ? "rotate-180 transition-transform" : ""} />
                         <span>{isFlipped ? "Show Term" : "Show Definition"}</span>
                     </button>
 
-                    <button onClick={handleNext} className="p-4 rounded-full bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 hover:text-white transition-all">
+                    <button onClick={handleNext} className="p-4 rounded-full bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white transition-all">
                         <ChevronRight size={24} />
                     </button>
                 </div>

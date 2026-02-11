@@ -6,6 +6,8 @@ import { DocumentSessionManager, DocumentSession } from '../core/DocumentSession
 import type { ParagraphData, PaperStructure, Annotation } from '../types/ReaderTypes';
 import { AnnotationManager } from '../core/AnnotationManager';
 
+import { toPlainTextFromHtml } from '../core/TextRendering';
+
 interface UseDocumentLoaderProps {
   activeFile: LibraryItem | null;
   storageManager: LocalStorageManager | null;
@@ -28,15 +30,36 @@ export function useDocumentLoader({
   const [error, setError] = useState<string | null>(null);
   
   const sessionRef = useRef<DocumentSession | null>(null);
+  const hydratedBlobUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
+    return () => {
+      if (hydratedBlobUrlsRef.current.length > 0) {
+        hydratedBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+        hydratedBlobUrlsRef.current = [];
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     if (!activeFile) {
         if (sessionRef.current) {
             // Auto-save on closing
             sessionRef.current.save().catch(console.error);
             sessionRef.current = null;
         }
+
+        if (hydratedBlobUrlsRef.current.length > 0) {
+            hydratedBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+            hydratedBlobUrlsRef.current = [];
+        }
+
+        annotationManagerRef.current = null;
         setParagraphs([]);
+        setError(null);
+        setLoading(false);
         return;
     }
 
@@ -44,7 +67,7 @@ export function useDocumentLoader({
       // 0. Auto-save previous session if switching files
       if (sessionRef.current && sessionRef.current.id !== activeFile.filePath) {
           console.log("Saving previous session", sessionRef.current.id);
-          await sessionRef.current.save();
+          await sessionRef.current.save().catch(console.error);
           sessionRef.current = null;
       }
       
@@ -53,10 +76,13 @@ export function useDocumentLoader({
           return; 
       }
 
+      setParagraphs([]); // prevent stale document flash while switching files
       setLoading(true);
       setError(null);
       
       try {
+        await storageManager?.checkEnvironment();
+
         if (!storageManager) {
              // If storage not ready, we can't load session. 
              // We'll return and wait for next render when storageManager is present
@@ -72,18 +98,22 @@ export function useDocumentLoader({
 
         // 2. Load Session State
         const state = await session.load();
+        if (cancelled) return;
 
         // 3. Hydrate Images (Legacy Logic adapted)
         let finalParagraphs = state.paragraphs;
+        const nextBlobUrls: string[] = [];
         if (storageManager.isConnected) {
             finalParagraphs = await Promise.all(state.paragraphs.map(async (p) => {
                 if (p.type === 'image' && p.metadata?.src && 
                     !p.metadata.src.startsWith('http') && 
-                    !p.metadata.src.startsWith('data:')) {
+                    !p.metadata.src.startsWith('data:') &&
+                    !p.metadata.src.startsWith('blob:')) {
                     try {
                         const decodedSrc = decodeURIComponent(p.metadata.src);
                         const blobUrl = await storageManager.loadFileAsUrl(decodedSrc);
                         if (blobUrl) {
+                            nextBlobUrls.push(blobUrl);
                             return { ...p, metadata: { ...p.metadata, src: blobUrl } };
                         }
                     } catch (e) {
@@ -93,6 +123,16 @@ export function useDocumentLoader({
                 return p;
             })); 
         }
+
+        if (cancelled) {
+            nextBlobUrls.forEach((url) => URL.revokeObjectURL(url));
+            return;
+        }
+
+        if (hydratedBlobUrlsRef.current.length > 0) {
+            hydratedBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+        }
+        hydratedBlobUrlsRef.current = nextBlobUrls;
 
         setParagraphs(finalParagraphs);
 
@@ -104,8 +144,24 @@ export function useDocumentLoader({
         }
         
         if (onDocumentLoaded) {
-            onDocumentLoaded(state.content);
-            window.dispatchEvent(new CustomEvent('document-loaded', { detail: { text: state.content } }));
+            // Generate Clean Full Text for Agent
+            // State content is Raw HTML. Agent needs Plain Text.
+            // We reconstruct it from paragraphs to respect the parsing logic (excluding scripts/styles/garbage)
+            const cleanFullText = finalParagraphs
+                .map(p => {
+                    const idMarker = `[[ID:${p.id}]]`;
+                    if (p.type === 'heading') return `${idMarker} # ${toPlainTextFromHtml(p.enText)}`;
+                    if (p.type === 'code') return `${idMarker} \`\`\`\n${toPlainTextFromHtml(p.enText)}\n\`\`\``;
+                    // Prefer English text for global context if available (assuming scientific papers)
+                    // But if it's empty, use Korean
+                    const text = toPlainTextFromHtml(p.enText) || toPlainTextFromHtml(p.koText);
+                    return `${idMarker} ${text}`;
+                })
+                .filter(t => t.length > 0)
+                .join('\n\n');
+
+            onDocumentLoaded(cleanFullText);
+            window.dispatchEvent(new CustomEvent('document-loaded', { detail: { text: cleanFullText } }));
         }
         
         // Sync Annotations
@@ -116,16 +172,57 @@ export function useDocumentLoader({
 
       } catch (e: any) {
         console.error("Document load failed", e);
-        setError(e.message || "Failed to load document");
-        toast.error("Failed to load document");
+        const message = e?.message || "Failed to load document";
+        if (!cancelled) {
+            setError(message);
+            toast.error("문서 로드 실패", { description: message });
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+            setLoading(false);
+        }
       }
     };
 
-    load();
+    load().catch((error) => {
+        if (cancelled) return;
+        console.error("Unexpected document load error", error);
+        setError("Unexpected document load error");
+        setLoading(false);
+    });
+
+    return () => {
+        cancelled = true;
+    };
 
   }, [activeFile, storageManager]);
+
+  // Save Confirmation
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (sessionRef.current && sessionRef.current.isDirty()) {
+        e.preventDefault();
+        e.returnValue = ''; // Modern browsers require setting returnValue
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Auto-save interval
+  useEffect(() => {
+    if (!activeFile) return;
+
+    const interval = setInterval(() => {
+      if (sessionRef.current && sessionRef.current.isDirty()) {
+        console.log("[AutoSave] Saving session...");
+        sessionRef.current.save().catch(console.error);
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [activeFile]);
 
   return { loading, paragraphs, setParagraphs, error, sessionRef };
 }

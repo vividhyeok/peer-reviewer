@@ -97,6 +97,8 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
       _onAnnotationsChange(newAnnos);
       if (sessionRef.current) {
           sessionRef.current.setAnnotations(newAnnos);
+          // Explicitly save to ensure trust
+          sessionRef.current.save().catch(e => console.error("Auto-save failed", e));
       }
   }, [_onAnnotationsChange]);
   // ------------------------
@@ -240,6 +242,59 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
       return () => window.removeEventListener('open-flashcard-review', handleOpenReview);
   }, []);
 
+  const handleSmartAsk = useCallback(() => {
+    if (!currentSelection) return;
+    
+    // Find the enclosing sentence and retrieve Eng/Kor pair
+    const para = paragraphs.find(p => p.id === currentSelection.paragraphId);
+    if (para && para.sentences) {
+        // Simple heuristic: which sentence contains the selection?
+        // Since we don't have exact index from selection API easily without DOM traversal,
+        // we try to fuzzy match the selection text against sentences.
+        const selectionText = currentSelection.text.trim();
+        const matchedSentence = para.sentences.find(s => 
+            (s.en && s.en.includes(selectionText)) || 
+            (s.ko && s.ko.includes(selectionText))
+        );
+
+        if (matchedSentence) {
+            // "Quick Ask" - Lightweight context checking
+            const query = `
+[Context Awareness Query]
+The user is reading this sentence:
+"${matchedSentence.en || matchedSentence.ko}"
+
+Question: What does this specific sentence mean in the context of this paper? 
+Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge. Korean.
+`;
+            
+            // Dispatch to AI Panel
+            const event = new CustomEvent('research-agent-query', { 
+                detail: { 
+                    prompt: query,
+                    autoSend: true // Auto-send for quick interaction, as requested "Quick Ask"
+                } 
+            });
+            window.dispatchEvent(event);
+            setToolbarVisible(false);
+            window.getSelection()?.removeAllRanges();
+            return;
+        }
+    }
+
+    // Fallback if no sentence matched
+    const event = new CustomEvent('research-agent-query', { 
+        detail: { 
+            query: `Briefly explain this concept in one line: "${currentSelection.text}"`,
+            selection: currentSelection.text,
+            autoSend: true
+        } 
+    });
+    window.dispatchEvent(event);
+    setToolbarVisible(false);
+    window.getSelection()?.removeAllRanges();
+  }, [currentSelection, paragraphs]);
+
   const runAutoHighlight = async (text: string, currentParagraphs: ParagraphData[]) => {
     if (!aiClientRef.current) return;
     const modelId = settings.modelAssignments['summarize'] || 'deepseek-chat';
@@ -380,8 +435,8 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     setTimeout(() => {
         const selection = window.getSelection();
         
-        // Strict validation: Must be non-empty and at least 5 chars long to show toolbar
-        if (!selection || selection.isCollapsed || selection.toString().trim().length < 5) {
+        // Strict validation: Must be non-empty and at least 1 char long to show toolbar
+        if (!selection || selection.isCollapsed || selection.toString().trim().length < 1) {
           setToolbarVisible(false);
           return;
         }
@@ -432,9 +487,14 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         para.koText
       );
 
-      setParagraphs(prev => prev.map(p =>
-        p.id === paragraphId ? { ...p, sentences: aligned } : p
-      ));
+      setParagraphs(prev => {
+        const next = prev.map(p =>
+            p.id === paragraphId ? { ...p, sentences: aligned } : p
+        );
+        // Important: Update session manager to ensure persistence
+        if (sessionRef.current) sessionRef.current.setParagraphs(next);
+        return next;
+      });
       toast.success("Alignment refined by AI");
     } catch (e) {
       console.error(e);
@@ -442,7 +502,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     }
   }, [paragraphs, settings.apiKeys, settings.modelAssignments]);
 
-  const handleAIRepair = useCallback(async (paragraphId: string) => {
+  const handleAIRepair = useCallback(async (paragraphId: string, instruction?: string) => {
     if (!aiClientRef.current) return;
     const para = paragraphs.find(p => p.id === paragraphId);
     if (!para) return;
@@ -458,16 +518,25 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
       const repaired = await aiClientRef.current.repairParagraph(
         { provider: modelInfo.provider, modelId: modelInfo.id },
         para.enText,
-        para.koText
+        para.koText,
+        instruction
       );
 
-      setParagraphs(prev => prev.map(p =>
-        p.id === paragraphId ? { ...p, enText: repaired.en, koText: repaired.ko, sentences: [] } : p
-      ));
+      setParagraphs(prev => {
+        const next = prev.map(p =>
+            p.id === paragraphId ? { ...p, enText: repaired.en, koText: repaired.ko, sentences: [] } : p
+        );
+        // Important: Update session manager to ensure persistence
+        if (sessionRef.current) {
+          sessionRef.current.setParagraphs(next);
+          sessionRef.current.save().catch((err) => console.error("Auto-save failed:", err));
+        }
+        return next;
+      });
       toast.success("Paragraph repaired by AI");
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      toast.error("AI Repair failed");
+      toast.error(e.message || "AI Repair failed");
     }
   }, [paragraphs, settings.apiKeys, settings.modelAssignments]);
 
@@ -578,6 +647,20 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     setModalOpen(true);
   };
 
+  const handleManualDefine = () => {
+    if (!currentSelection) return;
+    const selection = currentSelection; // Capture selection
+    setModalConfig({
+        title: 'Add Manual Tooltip/Note',
+        description: `Adding tooltip for: "${selection.text.slice(0, 30)}..."`,
+        onConfirm: (text) => {
+            processAnnotation('manual-definition', text, undefined, selection);
+            toast.success("Tooltip added");
+        }
+    });
+    setModalOpen(true);
+  };
+
   const handleAIAction = async (type: string) => {
     if (!currentSelection && type !== 'summarize' && type !== 'critique') {
       toast.error("먼저 텍스트를 선택해주세요");
@@ -589,9 +672,40 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     // Open Research Agent with a specific prompt
     let prompt = "";
     switch(type) {
-      case 'explain': 
-        prompt = CS_RESEARCH_PROMPTS.explain(textToProcess); 
-        break;
+      case 'explain':
+        // Direct In-Text Generation (User Request)
+        {
+             const explainPrompt = CS_RESEARCH_PROMPTS.explain(textToProcess);
+             const provider = settings.apiKeys.deepseek ? 'deepseek' : (settings.apiKeys.gemini ? 'gemini' : 'openai');
+             const model = provider === 'deepseek' ? 'deepseek-chat' : (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+
+             if (!settings.apiKeys[provider]) {
+                toast.error("AI API 키 설정을 먼저 해주세요.");
+                return;
+             }
+
+             const capturedSelection = currentSelection; // Capture closure
+
+             const promise = (async () => {
+                 const response = await aiClientRef.current!.sendMessage(
+                     provider, 
+                     model, 
+                     [{ role: 'user', content: explainPrompt }]
+                 );
+                 
+                 // Create an 'insight' annotation for the explanation
+                 if (capturedSelection) {
+                    processAnnotation('insight', response.content, undefined, capturedSelection);
+                 }
+             })();
+
+             toast.promise(promise, {
+                 loading: '설명 생성 중...',
+                 success: '설명이 노트에 추가되었습니다 (Insight)',
+                 error: '생성 실패'
+             });
+             return; // Stop here, do not open chat
+        }
       case 'summarize': 
         prompt = CS_RESEARCH_PROMPTS.summarize(textToProcess); 
         break;
@@ -604,6 +718,11 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
       case 'question': 
         prompt = `I have a question about this part: "${textToProcess}"\n\n My question is: `; 
         break;
+      case 'sendToChat':
+        window.dispatchEvent(new CustomEvent('research-agent-open', {
+            detail: { prompt: textToProcess, autoSend: false }
+        }));
+        return;
       case 'discuss': 
         window.dispatchEvent(new CustomEvent('research-agent-open', {
           detail: { prompt: `Let's discuss this part: "${textToProcess}"`, autoSend: false }
@@ -621,22 +740,22 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
 
   if (!activeFile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-500 animate-in fade-in duration-700 bg-zinc-50/50 dark:bg-zinc-950/50">
-        <div className="text-center p-12 flex flex-col items-center max-w-lg bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col items-center justify-center h-full text-zinc-500 animate-in fade-in duration-700 bg-zinc-50/50">
+        <div className="text-center p-12 flex flex-col items-center max-w-lg bg-white rounded-3xl shadow-2xl border border-zinc-200">
           <div className="relative mb-6 w-20 h-20 flex items-center justify-center">
             <div className="absolute inset-0 bg-blue-500/10 rounded-full animate-ping opacity-20" />
             <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-blue-500 to-violet-500 flex items-center justify-center text-white shadow-lg rotate-3 group hover:rotate-6 transition-transform duration-500">
               <BookOpen size={40} strokeWidth={1.5} />
             </div>
           </div>
-          <h3 className="text-2xl font-serif text-zinc-900 dark:text-white mb-3 tracking-tight">Begin Research Session</h3>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed mb-8 px-8">
+          <h3 className="text-2xl font-serif text-zinc-900 mb-3 tracking-tight">Begin Research Session</h3>
+          <p className="text-sm text-zinc-500 leading-relaxed mb-8 px-8">
             Select a document to enter the immersive reading environment. 
             <br/>AI tools will be ready to assist you.
           </p>
           <button
             onClick={() => { onToggleLibrary(); }}
-            className="group relative px-6 py-3 bg-zinc-900 dark:bg-white text-zinc-50 dark:text-zinc-900 rounded-xl font-medium tracking-wide overflow-hidden shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all"
+            className="group relative px-6 py-3 bg-zinc-900 text-zinc-50 rounded-xl font-medium tracking-wide overflow-hidden shadow-xl hover:shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             <span className="relative z-10 flex items-center gap-2">
               <LibraryManagerIcon size={18} />
@@ -653,7 +772,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     <div className="relative w-full h-full flex flex-col">
 
       <div className="absolute top-6 right-6 z-40 flex items-center gap-2 pointer-events-none">
-        <div className="flex items-center gap-1 p-1 bg-[color:var(--bg-panel)]/80 dark:bg-[color:var(--bg-panel)]/80 backdrop-blur-xl border border-[color:var(--border)] rounded-full shadow-2xl shadow-black/10 pointer-events-auto transition-all hover:bg-[color:var(--bg-panel)]">
+        <div className="flex items-center gap-1 p-1 bg-[color:var(--bg-panel)]/80 backdrop-blur-xl border border-[color:var(--border)] rounded-full shadow-2xl shadow-black/10 pointer-events-auto transition-all hover:bg-[color:var(--bg-panel)]">
           <div className="flex items-center px-2 border-r border-[color:var(--border)]">
             <button onClick={() => setZoomLevel(z => Math.max(50, z - 10))} className="p-1.5 hover:text-[color:var(--fg-primary)] text-[color:var(--fg-secondary)] rounded-full"><ChevronDown size={14} /></button>
             <span className="text-[10px] font-mono w-8 text-center text-[color:var(--fg-secondary)]">{zoomLevel}%</span>
@@ -690,7 +809,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         onMouseUp={handleMouseUp}
         onScroll={handleScroll}
       >
-        <div className="w-full min-h-screen pb-40" style={{ zoom: `${zoomLevel}%` }}>
+        <div className="w-full min-h-screen pb-40" style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}>
           <div className="w-full max-w-3xl mx-auto">
             <div className="prose-reader">
               {paragraphs.map((para) => {
@@ -742,9 +861,12 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         onHighlight={(color) => processAnnotation('highlight', '', color)}
         onDefine={handleDefine}
         onQuestion={handleQuestionPrompt}
+        onSmartAsk={handleSmartAsk}
         onChat={() => handleAIAction('discuss')}
+        onSendToChat={() => handleAIAction('sendToChat')}
         onExplain={() => handleAIAction('explain')}
         onSummarize={() => handleAIAction('summarize')}
+        onManualDefine={handleManualDefine}
         onClose={() => setToolbarVisible(false)}
       />
 

@@ -105,12 +105,12 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
             className={clsx(
                 "relative flex flex-col p-4 rounded-2xl border-2 transition-all text-left h-full",
                 exportType === id
-                    ? `border-${colorClass}-500 bg-${colorClass}-50 dark:bg-${colorClass}-500/10`
-                    : "border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-transparent"
+                    ? `border-${colorClass}-500 bg-${colorClass}-50`
+                    : "border-zinc-100 hover:border-zinc-300 bg-white"
             )}
         >
-            <Icon size={24} className={clsx("mb-2", exportType === id ? `text-${colorClass}-600 dark:text-${colorClass}-400` : "text-zinc-400")} />
-            <span className={clsx("font-bold text-sm block", exportType === id ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400")}>{label}</span>
+            <Icon size={24} className={clsx("mb-2", exportType === id ? `text-${colorClass}-600` : "text-zinc-400")} />
+            <span className={clsx("font-bold text-sm block", exportType === id ? "text-zinc-900" : "text-zinc-600")}>{label}</span>
             <span className="text-[11px] text-zinc-500 mt-1 leading-snug">{desc}</span>
             {exportType === id && <Check size={16} className={`absolute top-4 right-4 text-${colorClass}-500`} />}
         </button>
@@ -131,20 +131,20 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                className="relative z-10 bg-white dark:bg-zinc-950 rounded-3xl shadow-2xl w-full max-w-2xl border border-zinc-200 dark:border-zinc-800 max-h-[90vh] flex flex-col"
+                className="relative z-10 bg-white rounded-3xl shadow-2xl w-full max-w-2xl border border-zinc-200 max-h-[90vh] flex flex-col"
             >
                 {/* Header */}
-                <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between shrink-0">
+                <div className="p-6 border-b border-zinc-100 flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 shadow-lg">
+                        <div className="w-10 h-10 rounded-2xl bg-zinc-900 flex items-center justify-center text-white shadow-lg">
                             <Download size={20} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-zinc-900 dark:text-zinc-50">내보내기 (Export)</h3>
+                            <h3 className="font-bold text-zinc-900">내보내기 (Export)</h3>
                             <p className="text-xs text-zinc-500">Obsidian 및 마크다운 호환 형식</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors text-zinc-400">
+                    <button onClick={onClose} className="p-2 hover:bg-zinc-100 rounded-xl transition-colors text-zinc-400">
                         <X size={20} />
                     </button>
                 </div>
@@ -154,7 +154,7 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                     {!result ? (
                         <div className="space-y-6">
                             {/* Scope Selector */}
-                            <div className="flex p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl">
+                            <div className="flex p-1 bg-zinc-100 rounded-xl">
                                 {[
                                     { id: 'all', label: '전체 문서' },
                                     { id: 'highlights-only', label: '하이라이트만' },
@@ -167,8 +167,8 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                                         className={clsx(
                                             "flex-1 py-2 text-xs font-medium rounded-lg transition-all",
                                             scope === opt.id
-                                                ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm"
-                                                : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300",
+                                                ? "bg-white text-zinc-900 shadow-sm"
+                                                : "text-zinc-500 hover:text-zinc-700",
                                             (opt.id === 'until-bookmark' && !bookmarkId) && "opacity-50 cursor-not-allowed"
                                         )}
                                     >
@@ -224,29 +224,29 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                                         value={customPrompt}
                                         onChange={(e) => setCustomPrompt(e.target.value)}
                                         placeholder="예: 이 논문의 한계점 위주로 정리해줘..."
-                                        className="w-full h-24 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/20"
+                                        className="w-full h-24 p-3 rounded-xl border border-zinc-200 bg-zinc-50 text-sm focus:outline-none focus:ring-2 focus:ring-pink-500/20"
                                     />
                                 </div>
                             )}
 
                             {/* Analytics */}
-                            <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                            <div className="flex items-center justify-between p-4 bg-zinc-50 rounded-xl border border-zinc-100">
                                 <span className="text-xs text-zinc-500">내보낼 항목:</span>
                                 <div className="flex gap-4">
                                     <div className="flex items-center gap-1.5">
                                         <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                        <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{paragraphs.length} 문단</span>
+                                        <span className="text-xs font-medium text-zinc-600">{paragraphs.length} 문단</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
                                         <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                                        <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{annotations.length} 하이라이트</span>
+                                        <span className="text-xs font-medium text-zinc-600">{annotations.length} 하이라이트</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     ) : (
                         <div className="space-y-4 h-full flex flex-col">
-                            <div className="flex-1 overflow-y-auto p-4 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 font-mono text-xs leading-relaxed whitespace-pre-wrap select-text">
+                            <div className="flex-1 overflow-y-auto p-4 bg-zinc-50 rounded-2xl border border-zinc-200 font-mono text-xs leading-relaxed whitespace-pre-wrap select-text">
                                 {result}
                             </div>
                         </div>
@@ -254,12 +254,12 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 bg-white/50 dark:bg-zinc-950/50 backdrop-blur-xl rounded-b-3xl">
+                <div className="p-6 border-t border-zinc-100 bg-white/50 backdrop-blur-xl rounded-b-3xl">
                     {!result ? (
                         <button
                             onClick={handleExport}
                             disabled={loading || (exportType === 'custom-prompt' && !customPrompt.trim())}
-                            className="w-full py-3.5 bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-zinc-500/10"
+                            className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-zinc-500/10"
                         >
                             {loading ? <Loader2 className="animate-spin" size={18} /> : (exportType === 'raw-dump' ? <FileText size={18}/> : <Sparkles size={18} />)}
                             {exportType === 'raw-dump' ? '추출하기' : 'AI 생성하기'}
@@ -268,7 +268,7 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                         <div className="flex gap-3">
                              <button
                                 onClick={() => copyToClipboard(result)}
-                                className="flex-1 py-3.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                                className="flex-1 py-3.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
                             >
                                 <FileText size={18} /> 복사 (Copy)
                             </button>
@@ -280,7 +280,7 @@ export const SmartExportModal: React.FC<SmartExportModalProps> = ({
                             </button>
                             <button
                                 onClick={() => setResult(null)}
-                                className="px-5 py-3.5 bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded-xl font-bold transition-colors"
+                                className="px-5 py-3.5 bg-transparent hover:bg-zinc-100 text-zinc-500 rounded-xl font-bold transition-colors"
                             >
                                 뒤로
                             </button>

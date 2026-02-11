@@ -96,20 +96,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: -20 }}
                         transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
-                        className="relative w-full max-w-xl bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col"
+                        className="relative w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-zinc-200 overflow-hidden flex flex-col"
                     >
                         {/* Search Input */}
-                        <div className="flex items-center px-4 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
+                        <div className="flex items-center px-4 py-4 border-b border-zinc-200 bg-zinc-50">
                             <Search className="text-zinc-400 mr-3" size={18} />
                             <input
                                 ref={inputRef}
                                 type="text"
                                 placeholder="Type a command or search..."
-                                className="flex-1 bg-transparent border-none outline-none text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-500"
+                                className="flex-1 bg-transparent border-none outline-none text-sm text-zinc-900 placeholder:text-zinc-500"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                             />
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-200 dark:bg-zinc-800 text-[10px] font-bold text-zinc-500 tracking-wider">
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-200 text-[10px] font-bold text-zinc-500 tracking-wider">
                                 <span>ESC</span>
                             </div>
                         </div>
@@ -128,8 +128,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                                         className={clsx(
                                             "w-full flex items-center px-4 py-2.5 transition-all text-left",
                                             idx === activeIndex
-                                                ? "bg-blue-600/10 dark:bg-blue-500/15 border-l-4 border-blue-500"
-                                                : "bg-transparent border-l-4 border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800/50"
+                                                ? "bg-blue-600/10 border-l-4 border-blue-500"
+                                                : "bg-transparent border-l-4 border-transparent hover:bg-zinc-100"
                                         )}
                                     >
                                         <div className={clsx(
@@ -141,7 +141,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                                         <div className="flex-1 min-w-0">
                                             <p className={clsx(
                                                 "text-sm font-medium truncate",
-                                                idx === activeIndex ? "text-blue-500 dark:text-blue-400" : "text-zinc-700 dark:text-zinc-200"
+                                                idx === activeIndex ? "text-blue-500" : "text-zinc-700"
                                             )}>
                                                 {cmd.label}
                                             </p>
@@ -150,7 +150,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                                             )}
                                         </div>
                                         {cmd.shortcut && (
-                                            <span className="ml-4 text-[10px] font-mono font-medium text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700">
+                                            <span className="ml-4 text-[10px] font-mono font-medium text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded border border-zinc-200">
                                                 {cmd.shortcut}
                                             </span>
                                         )}
@@ -164,10 +164,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                         </div>
 
                         {/* Hint */}
-                        <div className="px-4 py-2.5 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 flex items-center justify-between text-[10px] text-zinc-400 font-medium">
+                        <div className="px-4 py-2.5 border-t border-zinc-100 bg-zinc-50 flex items-center justify-between text-[10px] text-zinc-400 font-medium">
                             <div className="flex items-center gap-4">
-                                <span className="flex items-center gap-1"><span className="p-1 rounded bg-zinc-200 dark:bg-zinc-800">↑↓</span> to navigate</span>
-                                <span className="flex items-center gap-1"><span className="p-1 rounded bg-zinc-200 dark:bg-zinc-800">ENTER</span> to select</span>
+                                <span className="flex items-center gap-1"><span className="p-1 rounded bg-zinc-200">↑↓</span> to navigate</span>
+                                <span className="flex items-center gap-1"><span className="p-1 rounded bg-zinc-200">ENTER</span> to select</span>
                             </div>
                             <span className="italic flex items-center gap-1">Command Sync <ChevronRight size={10} /></span>
                         </div>

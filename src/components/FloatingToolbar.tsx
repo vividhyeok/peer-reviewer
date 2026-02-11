@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { 
   Sparkles, 
   MessageSquare, 
@@ -10,7 +10,10 @@ import {
   MessagesSquare, 
   Search, 
   HelpCircle,
-  EyeOff
+  EyeOff,
+  TextCursorInput,
+  Send,
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -23,8 +26,12 @@ interface FloatingToolbarProps {
   onDefine: () => void;
   onQuestion: () => void;
   onChat: () => void;
+  onSendToChat?: () => void;
+  // New: Smart Ask (Bilingual Context)
+  onSmartAsk?: () => void;
   onExplain: () => void;
   onSummarize: () => void;
+  onManualDefine: () => void;
   onClose: () => void;
   onHideTemporarily?: () => void;
 }
@@ -36,7 +43,7 @@ const ActionTooltip: React.FC<{
   description: string;
   detailedDescription: string;
   children: React.ReactNode;
-  onClick: () => void;
+  onClick: (() => void) | undefined;
 }> = ({ title, shortcut, description, detailedDescription, children, onClick }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
@@ -76,11 +83,11 @@ const ActionTooltip: React.FC<{
             exit={{ opacity: 0 }}
             className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[240px] z-50 pointer-events-none"
           >
-            <div className="bg-zinc-900/90 dark:bg-zinc-100/90 backdrop-blur-md text-zinc-100 dark:text-zinc-900 px-3 py-2 rounded-lg shadow-xl text-xs flex flex-col gap-1 border border-white/10 dark:border-black/5">
-              <div className="flex items-center gap-2 border-b border-white/10 dark:border-black/5 pb-1 mb-0.5">
+            <div className="bg-zinc-900 border border-zinc-700/50 backdrop-blur-md text-zinc-100 px-3 py-2 rounded-lg shadow-xl text-xs flex flex-col gap-1">
+              <div className="flex items-center gap-2 border-b border-zinc-700/50 pb-1 mb-0.5">
                 <span className="font-bold text-sm tracking-tight">{title}</span>
                 {shortcut && (
-                  <span className="bg-white/10 dark:bg-black/10 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium">
+                  <span className="bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium">
                     {shortcut}
                   </span>
                 )}
@@ -88,7 +95,7 @@ const ActionTooltip: React.FC<{
               
               <div className="leading-relaxed opacity-90">
                  {showDetail ? (
-                   <span className="text-blue-200 dark:text-blue-800 font-medium animate-pulse">
+                   <span className="text-blue-300 font-medium animate-pulse">
                      {detailedDescription}
                    </span>
                  ) : (
@@ -104,7 +111,7 @@ const ActionTooltip: React.FC<{
               )}
             </div>
             {/* Arrow */}
-            <div className="w-2 h-2 bg-zinc-900/90 dark:bg-zinc-100/90 rotate-45 absolute left-1/2 -translate-x-1/2 -bottom-1" />
+            <div className="w-2 h-2 bg-zinc-900 rotate-45 absolute left-1/2 -translate-x-1/2 -bottom-1" />
           </motion.div>
         )}
       </AnimatePresence>
@@ -121,9 +128,12 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
   onDefine,
   onQuestion,
   onChat,
+  onSendToChat,
   onExplain,
   onSummarize,
+  onManualDefine,
   onClose,
+  onSmartAsk
 }) => {
   const style: React.CSSProperties = {
     position: 'fixed',
@@ -191,6 +201,16 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
             >
               <BookOpen size={16} />
             </ActionTooltip>
+
+            <ActionTooltip 
+              title="Manual Note" 
+              shortcut="Alt+M"
+              description="Add Tooltip"
+              detailedDescription="Manually add a tooltip definition to this text without AI."
+              onClick={onManualDefine}
+            >
+              <TextCursorInput size={16} />
+            </ActionTooltip>
           </div>
 
           <div className="w-px h-5 bg-[color:var(--border)] mx-1 opacity-50" />
@@ -198,7 +218,21 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
           {/* Section 3: Deep Dive / Agent */}
           <div className="flex items-center gap-0.5">
              <ActionTooltip 
-              title="Quick Ask" 
+              title="Smart Pair Ask" 
+              shortcut="Alt+Q"
+              description="Ask AI (with Orig. Context)"
+              detailedDescription="Sends the selected text + its English original context to the AI Agent."
+              onClick={onSmartAsk || onQuestion}
+             >
+                <div className="flex">
+                   <span className="text-[10px] font-bold mr-0.5">KR</span>
+                   <ArrowRight size={10} className="mt-1" />
+                   <span className="text-[10px] font-bold ml-0.5">EN</span>
+                </div>
+             </ActionTooltip>
+
+             <ActionTooltip 
+              title="Quick Ask"  
               shortcut="Alt+Q"
               description="Ask & Annotate"
               detailedDescription="Ask a question about this text and save the answer as a permanent note."
@@ -216,6 +250,18 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
             >
               <MessagesSquare size={16} />
             </ActionTooltip>
+
+            {onSendToChat && (
+              <ActionTooltip 
+                title="Send to Chat" 
+                shortcut="Alt+A"
+                description="Copy to Agent"
+                detailedDescription="Sends the selected text directly to the Research Agent input field."
+                onClick={onSendToChat}
+              >
+                <ArrowRight size={16} />
+              </ActionTooltip>
+            )}
           </div>
 
           <div className="w-px h-5 bg-[color:var(--border)] mx-1 opacity-50" />
@@ -223,21 +269,12 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
           <div className="flex items-center gap-0.5">
              <button
                onClick={onClose}
-               className="p-1.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 transition-colors"
+               className="p-1.5 rounded hover:bg-zinc-200 text-zinc-400 hover:text-zinc-600 transition-colors"
                title="Close Menu"
              >
                 <X size={14} />
              </button>
           </div>
-
-          <div className="w-px h-5 bg-[color:var(--border)] mx-1 opacity-50" />
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors"
-          >
-            <X size={14} />
-          </button>
         </motion.div>
       )}
     </AnimatePresence>

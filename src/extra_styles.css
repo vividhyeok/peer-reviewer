@@ -1,15 +1,123 @@
 
 /* AI Annotation Styles */
+/* 1. AI Definition (Green Dotted) */
 abbr.ds-def {
-  text-decoration: underline dotted #4ade80; /* green-400 */
-  text-decoration-thickness: 3px;
+  text-decoration: none !important;
+  border-bottom: 2px dotted #10b981; /* green-500 */
   cursor: help;
-  text-decoration-skip-ink: none;
+  transition: all 0.2s ease;
+}
+abbr.ds-def:hover {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border-bottom-style: solid;
 }
 
+/* 2. AI Question (Blue Dotted) */
 abbr.ds-q {
-  text-decoration: underline dotted #60a5fa; /* blue-400 */
-  text-decoration-thickness: 3px;
+  text-decoration: none !important;
+  border-bottom: 2px dotted #3b82f6; /* blue-500 */
   cursor: help;
-  text-decoration-skip-ink: none;
+  transition: all 0.2s ease;
+}
+abbr.ds-q:hover {
+  background-color: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+  border-bottom-style: solid;
+}
+
+/* 3. Manual User Tooltip (Orange Dotted) */
+abbr.ds-manual {
+  text-decoration: none !important;
+  border-bottom: 2px dotted #f97316; /* orange-500 */
+  cursor: help;
+  transition: all 0.2s ease;
+}
+abbr.ds-manual:hover {
+  background-color: rgba(249, 115, 22, 0.1);
+  color: #ea580c;
+  border-bottom-style: solid;
+}
+
+/* --- Notion-like Markdown Styling --- */
+.prose {
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+/* Code Blocks */
+.prose pre {
+    background-color: #1e1e1e !important;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 12px 0;
+    overflow-x: auto;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.prose code {
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 0.85em;
+    padding: 2px 4px;
+    border-radius: 4px;
+    background-color: rgba(0,0,0,0.06);
+    color: #ef4444; /* red-500 for inline code */
+    font-weight: 500;
+}
+.prose pre code {
+    background-color: transparent;
+    color: #e5e5e5;
+    padding: 0;
+    font-weight: 400;
+}
+
+/* Headers */
+.prose h1, .prose h2, .prose h3 {
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--fg-primary);
+}
+
+/* Blockquotes (Notion Callout Style) */
+.prose blockquote {
+    border-left: 3px solid #3b82f6;
+    background-color: rgba(59, 130, 246, 0.05); /* very light blue */
+    padding: 8px 12px;
+    margin: 12px 0;
+    border-radius: 4px;
+    font-style: normal;
+    color: var(--fg-secondary);
+}
+
+/* Lists */
+.prose ul {
+    list-style-type: disc;
+    padding-left: 1.2em;
+    margin: 8px 0;
+}
+.prose ol {
+    list-style-type: decimal;
+    padding-left: 1.2em;
+    margin: 8px 0;
+}
+
+/* Tables (Notion Style) */
+.prose table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.9em;
+}
+.prose th {
+    background-color: #f8fafc;
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 12px;
+    border: 1px solid #e2e8f0;
+}
+.prose td {
+    padding: 8px 12px;
+    border: 1px solid #e2e8f0;
 }

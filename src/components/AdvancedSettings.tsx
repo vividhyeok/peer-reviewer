@@ -385,35 +385,42 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
 
                     <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800" />
 
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          앱 테마 (App Theme)
-                        </label>
-                        <p className="text-xs text-zinc-500">라이트/다크 모드 전환</p>
-                      </div>
-                      <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                        <button
-                          onClick={() => updateSettings({ ...settings, theme: 'light' })}
-                          className={clsx(
-                            "px-3 py-1 text-xs font-medium rounded-md transition-all",
-                            settings.theme === 'light' ? "bg-white dark:bg-zinc-700 text-blue-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
-                          )}
-                        >
-                          Light
-                        </button>
-                        <button
-                          onClick={() => updateSettings({ ...settings, theme: 'dark' })}
-                          className={clsx(
-                            "px-3 py-1 text-xs font-medium rounded-md transition-all",
-                            settings.theme === 'dark' ? "bg-white dark:bg-zinc-700 text-blue-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
-                          )}
-                        >
-                          Dark
-                        </button>
-                      </div>
+                    <div className="space-y-3">
+                         <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                                <label className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                    화면 배율 (UI Scale)
+                                </label>
+                                <p className="text-xs text-zinc-500">
+                                    앱 전체 크기를 조절합니다 (현재: {Math.round((settings.uiZoom || 1) * 100)}%)
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => updateSettings({ ...settings, uiZoom: 1.0 })}
+                                className="text-xs px-2 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                            >
+                                초기화
+                            </button>
+                         </div>
+                         <div className="flex items-center gap-4">
+                            <span className="text-xs font-medium w-8 text-zinc-400">50%</span>
+                            <input 
+                                type="range" 
+                                min="0.5" 
+                                max="1.5" 
+                                step="0.1" 
+                                value={settings.uiZoom || 1}
+                                onChange={(e) => updateSettings({ ...settings, uiZoom: parseFloat(e.target.value) })}
+                                className="flex-1 h-2 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                            />
+                            <span className="text-xs font-medium w-8 text-right text-zinc-400">150%</span>
+                         </div>
+                        <p className="text-[10px] text-zinc-400 text-right">
+                           * CTRL + / - 단축키로도 조절 가능
+                        </p>
                     </div>
 
+                    <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800" />
                     <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800" />
 
                     <div className="space-y-2.5">
@@ -517,23 +524,45 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                       ) : (
                         /* Only show folder picker if NOT in dev server mode */
                         <>
-                          <button
-                            onClick={async () => {
-                              const success = await storageManager.requestDirectory();
-                              if (success) {
-                                setStorageInfo(storageManager.getStorageInfo());
-                                if (onSyncLibrary) {
-                                    onSyncLibrary();
-                                }
-                                alert('로컬 폴더가 설정되었습니다!');
-                              }
-                            }}
-                            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
-                          >
-                            <FolderOpen size={16} />
-                            로컬 폴더 선택 (Legacy)
-                          </button>
-                          <p className="text-[10px] text-zinc-500">배포 환경에서는 로컬 폴더 선택이 필요합니다.</p>
+                          {storageManager.isTauri ? (
+                             <div className="space-y-2 py-2">
+                                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                                  데이터 루트 폴더 (Root Folder Path)
+                                </label>
+                                <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      value={settings.dataRootPath || 'paper-reader-data'}
+                                      onChange={(e) => updateSettings({ ...settings, dataRootPath: e.target.value })}
+                                      className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400"
+                                      placeholder="paper-reader-data"
+                                    />
+                                    <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                      * 절대 경로(예: <code>D:\Research</code>) 또는 문서 폴더 내 상대 경로를 입력하세요.<br/>
+                                      * 변경 사항은 앱을 재시작하거나 재로딩할 때 적용됩니다.
+                                    </p>
+                                </div>
+                             </div>
+                          ) : (
+                              /* Browser Local File Handle (Legacy/Web) */
+                              <button
+                                onClick={async () => {
+                                  // Update logic for new requestDirectory signature (returns string | null)
+                                  const path = await storageManager.requestDirectory();
+                                  if (path) {
+                                    setStorageInfo(storageManager.getStorageInfo());
+                                    if (onSyncLibrary) {
+                                        onSyncLibrary();
+                                    }
+                                    alert('로컬 폴더가 설정되었습니다!');
+                                  }
+                                }}
+                                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
+                              >
+                                <FolderOpen size={16} />
+                                로컬 폴더 선택 (Browser Native)
+                              </button>
+                          )}
                         </>
                       )}
 

@@ -9,24 +9,48 @@ import { Sidebar } from './components/Sidebar';
 import { type AppSettings } from './types/settings';
 import { SettingsManager } from './core/SettingsManager';
 import { LibraryManager, type LibraryItem } from './core/LibraryManager';
+import { DocumentSessionManager } from './core/DocumentSessionManager';
 import { MultiAIClient } from './core/MultiAIClient';
-import { type Annotation, type PaperStructure } from './types/ReaderTypes';
+import { type Annotation, type PaperStructure, type AIMessage } from './types/ReaderTypes';
+import { type ChatSession } from './components/ConversationsPanel';
 import { LocalStorageManager } from './core/LocalStorageManager';
 import { AnnotationManager } from './core/AnnotationManager';
 import { useUndoableState } from './hooks/useUndoableState';
 
+
+import { OnboardingScreen } from './components/OnboardingScreen';
+
 function App() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
-  const [leftSidebarTab, setLeftSidebarTab] = useState<'library' | 'toc' | 'highlights'>('library');
-  const [rightSidebarTab, setRightSidebarTab] = useState<'agent' | 'notebook'>('agent');
+  const [leftSidebarTab, setLeftSidebarTab] = useState<'library' | 'toc' | 'highlights' | 'notebook'>('library');
+  const [rightSidebarTab, setRightSidebarTab] = useState<'agent' | 'conversations'>('agent');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>(() => SettingsManager.load());
 
-  const [activeFileId, setActiveFileId] = useState<string | null>(() => localStorage.getItem('active_file_id'));
-  const [library, setLibrary] = useState<LibraryItem[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(() => {
+      const saved = localStorage.getItem('active_file_id');
+      return saved ? saved : null;
+  });
+  // Initialize library immediately from local storage to prevent flash of empty state
+  const [library, setLibrary] = useState<LibraryItem[]>(() => {
+      const lib = LibraryManager.getLibrary();
+      return lib.sort((a, b) => b.lastOpened - a.lastOpened);
+  });
   const [currentDocText, setCurrentDocText] = useState<string>('');
+  
+  // Initialize from LocalStorage
+  const [savedSessions, setSavedSessions] = useState<ChatSession[]>(() => {
+    try {
+      const saved = localStorage.getItem('saved_chat_sessions');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error('Failed to parse saved sessions', e);
+      return [];
+    }
+  });
+
   const { 
     state: annotations, 
     setState: setAnnotations, 
@@ -43,20 +67,187 @@ function App() {
   const aiClientRef = useRef(new MultiAIClient(settings.apiKeys));
   const storageManagerRef = useRef(new LocalStorageManager());
 
-  const refreshLibrary = useCallback(() => {
-    const items = LibraryManager.getLibrary().sort((a, b) => b.lastOpened - a.lastOpened);
+  // --- Resizable Sidebars ---
+  const [sidebarWidths, setSidebarWidths] = useState(settings.sidebarWidths || { left: 450, right: 450 });
+  const [isResizing, setIsResizing] = useState<'left' | 'right' | null>(null);
+
+  useEffect(() => {
+    if (settings.sidebarWidths) {
+      setSidebarWidths(settings.sidebarWidths);
+    }
+  }, [settings.sidebarWidths]);
+
+  // Sync Data Root Path
+  useEffect(() => {
+    storageManagerRef.current.setRootPath(settings.dataRootPath);
+  }, [settings.dataRootPath]);
+
+  // Handlers for Onboarding
+  const handleOnboardingComplete = (path: string) => {
+      const newSettings = { 
+          ...settings, 
+          dataRootPath: path, 
+          setupCompleted: true 
+      };
+      setSettings(newSettings);
+      SettingsManager.save(newSettings);
+      
+      // Force sync after path change
+      // storageManager will be updated by useEffect dependency on settings.dataRootPath
+      // But we might need a small delay or direct set to ensure it's ready before refreshLibrary is called automatically
+      storageManagerRef.current.setRootPath(path).then(() => {
+          void refreshLibrary();
+      });
+  };
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+S: Save confirmation
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        toast.success("All changes saved automatically", {
+             description: "Your work is synced instantly."
+        });
+      }
+      
+      // Ctrl+F: Focus Search (if not already handled)
+      // We'll let native behavior or specific component logic handle this if present, 
+      // but preventing the browser "Find" bar is usually desired in apps like this.
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+          // If we want to open our Command Palette or Search:
+          // e.preventDefault();
+          // setCommandPaletteOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+  const startResizing = useCallback((side: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(side);
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      
+      // Request Animation Frame for smoother UI updates could be good, but direct setState is usually fine for this complexity
+      if (isResizing === 'left') {
+        const newWidth = Math.max(250, Math.min(800, e.clientX));
+        setSidebarWidths(prev => ({ ...prev, left: newWidth }));
+      } else {
+        const newWidth = Math.max(250, Math.min(800, window.innerWidth - e.clientX));
+        setSidebarWidths(prev => ({ ...prev, right: newWidth }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isResizing) {
+        setIsResizing(null);
+        // Save to settings
+        const newSettings = { ...settings, sidebarWidths: sidebarWidths };
+        // We call handleSaveSettings but be careful not to trigger infinite loop if it updates 'settings' prop which updates 'sidebarWidths' state.
+        // It's safe because of the check in useEffect above.
+        SettingsManager.save(newSettings);
+        setSettings(newSettings); 
+      }
+    };
+
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      // Add overlay to iframe components if any (like embedding pdfs) to prevent mouse trap
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, sidebarWidths, settings]);
+
+  // --- Zoom Handling (Root Font Size for Responsive Rem) ---
+  useEffect(() => {
+    if (settings.uiZoom) {
+      // Default browser font-size is usually 16px.
+      // We scale this percentage wise.
+      const percentage = Math.round(settings.uiZoom * 100);
+      document.documentElement.style.fontSize = `${percentage}%`;
+    }
+  }, [settings.uiZoom]);
+
+  useEffect(() => {
+    const handleZoom = (e: KeyboardEvent) => {
+      // Allow browser native zoom to work if not prevented? 
+      // Actually standardizing on rem-scaling gives better control in standalone app.
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          setSettings(prev => {
+             const current = prev.uiZoom || 1;
+             const newZoom = Math.min(Number((current + 0.1).toFixed(1)), 2.0); // Max 200%
+             const newSettings = { ...prev, uiZoom: newZoom };
+             SettingsManager.save(newSettings);
+             return newSettings;
+          });
+        } else if (e.key === '-') {
+           // ... (rest same) -> min 50%
+          e.preventDefault();
+          setSettings(prev => {
+             const current = prev.uiZoom || 1;
+             const newZoom = Math.max(Number((current - 0.1).toFixed(1)), 0.5);
+             const newSettings = { ...prev, uiZoom: newZoom };
+             SettingsManager.save(newSettings);
+             return newSettings;
+          });
+        } else if (e.key === '0') {
+           e.preventDefault();
+           setSettings(prev => {
+             const newSettings = { ...prev, uiZoom: 1.0 };
+             SettingsManager.save(newSettings);
+             return newSettings;
+           });
+        }
+      }
+    };
+    window.addEventListener('keydown', handleZoom);
+    return () => window.removeEventListener('keydown', handleZoom);
+  }, []);
+
+  const refreshLibrary = useCallback(async () => {
+    const storage = storageManagerRef.current;
     const hasSeenWelcome = localStorage.getItem('has_seen_welcome');
 
-    if (items.length === 0 && !hasSeenWelcome) {
-      LibraryManager.addItem('/doc1.html');
-      LibraryManager.addItem('/doc2.html');
-      LibraryManager.addItem('/doc3.html');
-      localStorage.setItem('has_seen_welcome', 'true');
-      const freshItems = LibraryManager.getLibrary().sort((a, b) => b.lastOpened - a.lastOpened);
-      setLibrary(freshItems);
-    } else {
-      setLibrary(items);
+    if (storage.isConnected) {
+      const synced = await LibraryManager.sync(storage);
+      if (synced.length > 0) {
+        setLibrary(synced.sort((a, b) => b.lastOpened - a.lastOpened));
+        return;
+      }
     }
+
+    const items = LibraryManager.getLibrary().sort((a, b) => b.lastOpened - a.lastOpened);
+    if (items.length > 0) {
+      setLibrary(items);
+      return;
+    }
+
+    if (!hasSeenWelcome) {
+      await LibraryManager.addItem('/docs/doc1.html', storage);
+      await LibraryManager.addItem('/docs/doc2.html', storage);
+      await LibraryManager.addItem('/docs/doc3.html', storage);
+      localStorage.setItem('has_seen_welcome', 'true');
+      setLibrary(LibraryManager.getLibrary().sort((a, b) => b.lastOpened - a.lastOpened));
+      return;
+    }
+
+    setLibrary([]);
   }, []);
 
   const handleSaveNote = useCallback((note: Annotation) => {
@@ -70,7 +261,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    refreshLibrary();
+    void refreshLibrary();
   }, [refreshLibrary]);
 
   useEffect(() => {
@@ -93,43 +284,78 @@ function App() {
     aiClientRef.current = new MultiAIClient(newSettings.apiKeys);
   }, []);
 
-  // Theme Management
+  const handleSaveSession = useCallback((messages: AIMessage[]) => {
+      if (messages.length === 0) return;
+      const newSession: ChatSession = {
+          id: crypto.randomUUID(),
+          title: messages[0].content.slice(0, 50) || 'New Conversation',
+          date: Date.now(),
+          messages,
+          preview: messages.length > 1 ? messages[1].content.slice(0, 100) : ''
+      };
+      setSavedSessions(prev => [newSession, ...prev]);
+      toast.success("Conversation saved");
+  }, []);
+
+  // Listener for Child Panel Data
   useEffect(() => {
-    // Set data attribute for CSS variables
-    document.documentElement.setAttribute('data-theme', settings.theme);
-    
-    // Set class for Tailwind dark mode
-    if (settings.theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [settings.theme]);
+     const handler = (e: any) => {
+         if (e.detail?.messages) {
+             handleSaveSession(e.detail.messages);
+         }
+     };
+     window.addEventListener('save-session-data', handler);
+     return () => window.removeEventListener('save-session-data', handler);
+  }, [handleSaveSession]);
+
+  const handleLoadSession = useCallback((session: ChatSession) => {
+      // Dispatch event to ResearchAgentPanel to load messages
+      // This is a bit hacky, normally we'd lift state, but for now we use the event bus
+      window.dispatchEvent(new CustomEvent('load-chat-session', { detail: { messages: session.messages } }));
+      setRightSidebarTab('agent');
+  }, []);
+
+  const handleDeleteSession = useCallback((id: string) => {
+      setSavedSessions(prev => prev.filter(s => s.id !== id));
+      toast.success("Session deleted");
+  }, []);
+
+  // Persist conversations
+  useEffect(() => {
+    localStorage.setItem('saved_chat_sessions', JSON.stringify(savedSessions));
+  }, [savedSessions]);
+
+  // Theme Management (Enforcing Light Mode)
+  useEffect(() => {
+    // Force Light Mode attributes
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.documentElement.classList.remove('dark');
+  }, [settings.theme]); // Keep dependency just in case, but we ignore the value.
 
   const syncLibraryWithStorage = useCallback(async () => {
-    const files = await storageManagerRef.current.listFiles();
-    if (files.length === 0) return;
-
-    let addedCount = 0;
-    const library = LibraryManager.getLibrary();
-    
-    files.forEach(filename => {
-        const exists = library.some(item => item.filePath === filename || item.filePath === '/' + filename);
-        if (!exists) {
-           LibraryManager.addItem(filename);
-           addedCount++;
-        }
-    });
-    
-    if (addedCount > 0) {
-        refreshLibrary();
-        toast.success(`${addedCount} new papers added from Local Folder`);
+    // New Robust Sync: Merges Disk + Local Storage + Physical Files
+    try {
+      const mergedLibrary = await LibraryManager.sync(storageManagerRef.current);
+      const sorted = mergedLibrary.sort((a, b) => b.lastOpened - a.lastOpened);
+      setLibrary(sorted);
+    } catch (error) {
+      console.error('[App] Library sync failed', error);
+      await refreshLibrary();
     }
+    
+    // Check if we added anything new (simple check against previous count or just toast)
+    // For now, silent sync is better UX than popping toast every refresh
   }, [refreshLibrary]);
 
   // Local Folder Reconnect Check (Browser Security Handling)
+  const isSyncingRef = useRef(false);
+  
   useEffect(() => {
     const checkStorage = async () => {
+      // Prevent double invocation in Strict Mode
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+
       // Attempt silent restore
       const restored = await storageManagerRef.current.restoreDirectoryHandle();
       
@@ -139,12 +365,7 @@ function App() {
         // Systematic Persistence: Try to load settings.json
         const localSettings = await storageManagerRef.current.loadJson<AppSettings>('settings.json');
         if (localSettings) {
-            setSettings(prev => ({
-                ...prev,
-                ...localSettings,
-                // Merge critical things logic if needed, but simple overwrite is often what user expects from "Sync"
-            }));
-            toast.success("Settings loaded from local folder");
+             setSettings(prev => ({ ...prev, ...localSettings }));
         }
       }
 
@@ -170,8 +391,10 @@ function App() {
         });
       }
     };
+
     checkStorage();
-  }, [syncLibraryWithStorage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-save Annotations (Handled by Reader Session with Dirty Flags)
   // We keep this useEffect strict or remove it to avoid conflicts.
@@ -198,13 +421,9 @@ function App() {
           icon: <Languages className="text-blue-500" size={16} />
         });
       }
-      // Theme Toggle: Alt+Shift+T
-      if (e.altKey && e.shiftKey && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        const nextTheme = settings.theme === 'dark' ? 'light' : 'dark';
-        handleSaveSettings({ ...settings, theme: nextTheme });
-        toast.success(`Theme switched to ${nextTheme}`);
-      }
+      
+      // Theme Toggle Removed (Light Mode Only Implementation)
+
       // Library Toggle: Alt+L
       if (e.altKey && e.key.toLowerCase() === 'l') {
         e.preventDefault();
@@ -214,6 +433,22 @@ function App() {
       if (e.altKey && e.key.toLowerCase() === 'i') {
         e.preventDefault();
         setRightSidebarOpen(prev => !prev);
+      }
+
+      // Undo: Ctrl+Z
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        if (canUndo) {
+          e.preventDefault();
+          undoAnnotations();
+        }
+      }
+
+      // Redo: Ctrl+Shift+Z or Ctrl+Y
+      if ((e.ctrlKey || e.metaKey) && ((e.shiftKey && e.key.toLowerCase() === 'z') || e.key.toLowerCase() === 'y')) {
+        if (canRedo) {
+          e.preventDefault();
+          redoAnnotations();
+        }
       }
     };
 
@@ -242,20 +477,9 @@ function App() {
       window.removeEventListener('toolbar-action', handleAction);
       window.removeEventListener('research-agent-open', handleOpenAgent);
     };
-  }, [settings, handleSaveSettings]);
+  }, [settings, handleSaveSettings, canUndo, canRedo, undoAnnotations, redoAnnotations]);
 
   const globalCommands: CommandItem[] = useMemo(() => [
-    {
-      id: 'toggle-theme',
-      label: 'Toggle Light/Dark Mode',
-      description: `Switch to ${settings.theme === 'dark' ? 'Light' : 'Dark'} theme`,
-      icon: <Settings size={18} />,
-      shortcut: 'Alt + Shift + T',
-      action: () => {
-        const nextTheme = settings.theme === 'dark' ? 'light' : 'dark';
-        handleSaveSettings({ ...settings, theme: nextTheme });
-      }
-    },
     {
       id: 'open-review',
       label: 'Review Concepts',
@@ -337,7 +561,7 @@ function App() {
       icon: <Search size={18} />,
       shortcut: 'Alt + F',
       action: () => {
-        const searchInput = document.querySelector('input[placeholder="Find..."]') as HTMLInputElement;
+        const searchInput = document.querySelector('input[placeholder="Find in text..."]') as HTMLInputElement;
         if (searchInput) searchInput.focus();
         else toast.error("Open a document first to search");
       }
@@ -401,8 +625,17 @@ function App() {
     setTimeout(() => setInitialAgentQuery(undefined), 1000);
   }, []);
 
+  if (!settings.setupCompleted) {
+    return (
+      <>
+        <OnboardingScreen storageManager={storageManagerRef.current} onComplete={handleOnboardingComplete} />
+        <Toaster position="top-right" theme="dark" richColors expand closeButton />
+      </>
+    );
+  }
+
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans flex flex-col">
+    <div className="relative w-screen h-screen overflow-hidden bg-white text-zinc-900 font-sans flex flex-col">
       {/* MS Word style Ribbon Top Bar */}
       <TopToolbar 
         settings={settings}
@@ -421,13 +654,18 @@ function App() {
           activeTab={leftSidebarTab}
           onTabChange={(tab: any) => setLeftSidebarTab(tab)}
           onClose={() => setLeftSidebarOpen(false)}
+          width={sidebarWidths.left}
+          onResizeStart={startResizing('left')}
           library={library}
           activeFileId={activeFileId}
           onSelectFile={(item) => setActiveFileId(item.id)}
           onRefreshLibrary={refreshLibrary}
           onRemoveFile={async (id) => {
             const item = library.find(i => i.id === id);
-            if (window.confirm(`"${item?.title}" 문서를 삭제하시겠습니까?`)) {
+            if (item && window.confirm(`"${item.title}" 문서를 삭제하시겠습니까?`)) {
+              // Clear memory session to prevent stale state on re-add
+              DocumentSessionManager.removeSession(item.filePath);
+              
               await LibraryManager.removeItem(id, storageManagerRef.current);
               if (activeFileId === id) setActiveFileId(null);
               refreshLibrary();
@@ -462,6 +700,8 @@ function App() {
           activeTab={rightSidebarTab}
           onTabChange={(tab: any) => setRightSidebarTab(tab)}
           onClose={() => setRightSidebarOpen(false)}
+          width={sidebarWidths.right}
+          onResizeStart={startResizing('right')}
           library={library}
           activeFileId={activeFileId}
           onSelectFile={(item) => setActiveFileId(item.id)}
@@ -474,6 +714,10 @@ function App() {
           storageManager={storageManagerRef.current}
           onSaveNote={handleSaveNote}
           onDeleteAnnotation={handleDeleteAnnotation}
+          savedSessions={savedSessions}
+          onLoadSession={handleLoadSession}
+          onDeleteSession={handleDeleteSession}
+          onSaveCurrentSession={() => window.dispatchEvent(new Event('trigger-save-session'))}
         />
       </div>
 

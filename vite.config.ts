@@ -7,9 +7,12 @@ import path from 'path'
 // This allows the web app to read/write files directly to the project folder during development.
 const localFileServer = () => ({
   name: 'local-file-server',
+  // @ts-ignore
   configureServer(server) {
+    // @ts-ignore
     server.middlewares.use('/api/fs', async (req, res, next) => {
       try {
+        // @ts-ignore
         const url = new URL(req.url!, `http://${req.headers.host}`);
         const endpoint = url.pathname; // e.g., /list, /file
         const query = Object.fromEntries(url.searchParams);
@@ -83,9 +86,12 @@ const localFileServer = () => ({
              fs.mkdirSync(dirPath, { recursive: true });
            }
 
+           // @ts-ignore
            const chunks = [];
+           // @ts-ignore
            req.on('data', chunk => chunks.push(chunk));
            req.on('end', () => {
+             // @ts-ignore
              const buffer = Buffer.concat(chunks);
              fs.writeFileSync(filePath, buffer);
              res.end('OK');
@@ -130,9 +136,21 @@ const localFileServer = () => ({
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), localFileServer()],
+  // Tauri settings
+  clearScreen: false,
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: true,
+    watch: {
+        ignored: ["**/src-tauri/**"],
+    },
+  },
+  envPrefix: ['VITE_', 'TAURI_'],
   build: {
-    target: 'esnext',
-    minify: false,
+    target: process.env.TAURI_ENV_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
+    minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
+    sourcemap: !!process.env.TAURI_ENV_DEBUG,
     chunkSizeWarningLimit: 1000,
   },
 })
