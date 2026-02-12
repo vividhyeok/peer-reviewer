@@ -14,7 +14,8 @@ interface NotebookPanelProps {
 // Citation-aware link component
 const CitationLink: React.FC<any> = ({ href, children, ...props }) => {
     if (href?.startsWith('citation:')) {
-        const id = href.replace('citation:', '');
+        const rawId = href.replace('citation:', '');
+        const id = rawId.startsWith('para-') ? rawId.slice(5) : rawId;
         return (
             <button
                 onClick={(e) => {
@@ -59,7 +60,7 @@ export const NotebookPanel: React.FC<NotebookPanelProps> = ({ annotations, onDel
     }
 
     return (
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+        <div className="h-full overflow-y-auto custom-scrollbar p-4 space-y-4">
             <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 px-1">Saved Insights ({items.length})</h3>
             
             {items.map(item => (

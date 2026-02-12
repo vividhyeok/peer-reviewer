@@ -321,7 +321,7 @@ User Query: "${query}"
 
 Task: You are a Research Scout. Scan the full document text below and EXTRACT the specific sections/paragraphs that contain the answer to the user's query.
 - Copy relevant sentences verbatim.
-- **IMPORTANT**: The text contains [[ID:para-...]] markers. YOU MUST PRESERVE THESE MARKERS in your extraction to allow citation.
+- **IMPORTANT**: The text contains [[ID:xxx]] markers. YOU MUST PRESERVE THESE MARKERS in your extraction to allow citation.
 - If the whole paper is relevant (e.g. "Summarize paper"), output "ALL_BUT_SUMMARIZED".
 - If the answer is NOT found, say "NOT_FOUND".
 
@@ -357,14 +357,14 @@ Instructions:
 1. **Evidence-Based**: ${useExternalKnowledge ? 'Prioritize the provided context, but you MAY use general knowledge to explain concepts not fully defined in the text.' : 'Use ONLY the provided context. If the answer is not in the text, explicitly state that.'}
 2. **Web Mode Optimization**: ${useExternalKnowledge ? 'If the context provided is a SUMMARY, rely on your internal knowledge + summary to answer quickly.' : 'Deeply analyze the text snippets.'}
 3. **Citation**: 
-   - The context contains [[ID:para-...]] markers. 
-   - cite your sources using [Ref](citation:para-ID).
+   - The context contains [[ID:xxx]] markers before each paragraph. 
+   - cite your sources using [Ref](citation:ID) where ID is the exact value from [[ID:ID]].
    - **Visual Cleanliness**: If multiple consecutive items come from the SAME paragraph, do NOT repeat the [Ref] for every item. Instead, cite it once at the end of the list or group.
    - Example: 
      * Item A
      * Item B
      * Item C
-     [Ref](citation:para-123)
+     [Ref](citation:a1b2c3d4)
 4. **Language**: Answer in Korean (한국어).
 5. **Style**: Direct, Academic, Insightful.
 

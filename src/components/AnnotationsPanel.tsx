@@ -53,7 +53,7 @@ export const AnnotationsPanel: React.FC<AnnotationsPanelProps> = ({ annotations,
     }
 
     return (
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+        <div className="h-full overflow-y-auto custom-scrollbar p-4 space-y-4">
             <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 px-1">Notebook ({items.length})</h3>
             
             {items.map(item => (

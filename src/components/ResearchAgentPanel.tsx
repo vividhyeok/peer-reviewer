@@ -287,8 +287,8 @@ ${isDOCMode
   ? `1. Answer STRICTLY based on the provided text only. Do NOT use external knowledge.
 2. When referencing the paper, ALWAYS include inline citation links using this exact format: [참조](citation:PARAGRAPH_ID)
    - The text contains markers like [[ID:xxx]] before each paragraph.
-   - Use the ID from the marker closest to the information you reference.
-   - Example: "이 연구에서는 transformer 모델을 제안합니다 [참조](citation:p3)"
+   - Use the EXACT ID value from the [[ID:xxx]] marker closest to the information you reference.
+   - Example: "이 연구에서는 transformer 모델을 제안합니다 [참조](citation:a1b2c3d4)"
 3. Include at least one [참조] link per claim you make from the paper.
 4. If the answer is not in the text, state "논문 내용에서 해당 정보를 찾을 수 없습니다."`
   : `1. You MAY freely use external knowledge to explain concepts.
@@ -547,7 +547,8 @@ Current Context:
                                                     components={{
                                                         a: ({ href, children, ...props }: any) => {
                                                             if (href?.startsWith('citation:')) {
-                                                                const id = href.replace('citation:', '');
+                                                                const rawId = href.replace('citation:', '');
+                                                                const id = rawId.startsWith('para-') ? rawId.slice(5) : rawId;
                                                                 return (
                                                                     <button 
                                                                         onClick={(e) => { 

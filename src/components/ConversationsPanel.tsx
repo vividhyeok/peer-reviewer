@@ -32,7 +32,7 @@ export const ConversationsPanel: React.FC<ConversationsPanelProps> = ({ sessions
     }
 
     return (
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3 bg-zinc-50/30">
+        <div className="h-full overflow-y-auto custom-scrollbar p-4 space-y-3 bg-zinc-50/30">
             <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2 px-1">Saved Sessions ({sessions.length})</h3>
             
             {sessions.sort((a,b) => b.date - a.date).map(session => (

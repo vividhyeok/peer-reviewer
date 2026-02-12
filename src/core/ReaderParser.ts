@@ -37,8 +37,14 @@ const TRANSLATION_BLOCK_SELECTOR = '[class*="immersive-translate-target-translat
 export class ReaderParser {
     static parse(source: string, baseUrl: string = ''): { paragraphs: ParagraphData[]; structure: PaperStructure } {
         const normalizedSource = this.normalizeSource(source);
-        // Pre-strip CSS/base/noise from Immersive Translate HTML before DOM parsing
-        const preprocessed = this.preprocessHtml(normalizedSource);
+        // Pre-strip massive redundant math/CSS from Immersive Translate HTML before DOM parsing
+        let preprocessed: string;
+        try {
+            preprocessed = this.preprocessHtml(normalizedSource);
+        } catch (e) {
+            console.warn('[ReaderParser] preprocessHtml failed, using raw source:', e);
+            preprocessed = normalizedSource;
+        }
         const parser = new DOMParser();
         const doc = parser.parseFromString(preprocessed, 'text/html');
 
