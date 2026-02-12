@@ -37,11 +37,14 @@ const TRANSLATION_BLOCK_SELECTOR = '[class*="immersive-translate-target-translat
 export class ReaderParser {
     static parse(source: string, baseUrl: string = ''): { paragraphs: ParagraphData[]; structure: PaperStructure } {
         const normalizedSource = this.normalizeSource(source);
+        // Pre-strip CSS/base/noise from Immersive Translate HTML before DOM parsing
+        const preprocessed = this.preprocessHtml(normalizedSource);
         const parser = new DOMParser();
-        const doc = parser.parseFromString(normalizedSource, 'text/html');
-        const root = this.pickRoot(doc);
+        const doc = parser.parseFromString(preprocessed, 'text/html');
 
+        // Remove noise BEFORE picking root (so textContent scoring is accurate)
         this.removeGlobalNoise(doc);
+        const root = this.pickRoot(doc);
 
         const context: ParserContext = {
             index: 0,
@@ -95,6 +98,23 @@ export class ReaderParser {
             return this.markdownToHtml(source);
         }
         return source;
+    }
+
+    /**
+     * Pre-process Immersive Translate HTML:
+     * - Strip <style> tags (~168KB CSS waste)
+     * - Remove <base> tag (prevents erroneous URL resolution)
+     * - Remove Ant Design UI elements
+     * This runs on raw string BEFORE DOMParser to reduce memory & prevent crashes.
+     */
+    private static preprocessHtml(html: string): string {
+        // Strip all <style ...>...</style> blocks (greedy, case-insensitive)
+        let result = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+        // Remove <base> tags
+        result = result.replace(/<base[^>]*>/gi, '');
+        // Remove Immersive Translate modal/toolbar/input UI containers (by class pattern)
+        result = result.replace(/<div[^>]*class="[^"]*(?:ant-modal|ant-tooltip|ant-select|ant-message|immersive-translate-modal|immersive-translate-popup)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, '');
+        return result;
     }
 
     private static isLikelyMarkdown(source: string): boolean {

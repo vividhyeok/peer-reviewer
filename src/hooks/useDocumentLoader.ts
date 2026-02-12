@@ -250,8 +250,9 @@ export function useDocumentLoader({
     load().catch((error) => {
         if (cancelled) return;
         console.error("Unexpected document load error", error);
-        setError("Unexpected document load error");
+        setError(error?.message || "Unexpected document load error");
         setLoading(false);
+        toast.error('문서 로드 중 오류 발생', { description: error?.message || String(error) });
     });
 
     return () => {

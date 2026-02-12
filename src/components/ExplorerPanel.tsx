@@ -97,9 +97,16 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
                     try {
                         const { invoke } = await import('@tauri-apps/api/core');
                         const isHtml = absolutePath.toLowerCase().endsWith('.html') || absolutePath.toLowerCase().endsWith('.htm');
-                        const filename: string = isHtml 
-                            ? await invoke('copy_html_with_images', { sourcePath: absolutePath })
-                            : await invoke('copy_file_to_data', { sourcePath: absolutePath });
+                        let filename: string;
+                        try {
+                            filename = isHtml 
+                                ? await invoke('copy_html_with_images', { sourcePath: absolutePath })
+                                : await invoke('copy_file_to_data', { sourcePath: absolutePath });
+                        } catch (copyErr) {
+                            console.error('[Import] File copy failed:', copyErr);
+                            toast.error('파일 복사 실패', { description: String(copyErr) });
+                            return;
+                        }
                         console.log('[Import] Rust copy succeeded:', filename, isHtml ? '(with images)' : '');
                         await LibraryManager.addItem(filename, storageManager);
                         toast.success(`"${filename}" 문서가 추가되었습니다`);
