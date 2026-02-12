@@ -4,8 +4,8 @@ import { AnnotationManager } from './AnnotationManager';
 import { readFileSafe } from './FileSystem';
 import type { Annotation, PaperStructure, ParagraphData } from '../types/ReaderTypes';
 
-const PARSE_CACHE_PREFIX = 'parse_v6_';
-const LEGACY_PARSE_CACHE_PREFIXES = ['parse_v5_', 'parse_v4_', 'parse_v3_'];
+const PARSE_CACHE_PREFIX = 'parse_v7_';
+const LEGACY_PARSE_CACHE_PREFIXES = ['parse_v6_', 'parse_v5_', 'parse_v4_', 'parse_v3_'];
 
 export interface DocumentState {
     id: string; // filePath
