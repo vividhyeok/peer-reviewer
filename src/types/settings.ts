@@ -99,6 +99,8 @@ export interface AppSettings {
   defaultLanguage: 'en' | 'ko';
   highlightColors: string[];
   autoSaveInterval: number; // seconds
+  postItWidth: number; // pixels (160-400)
+  postItSide: 'right' | 'left' | 'both'; // Which side to show post-its
   dataRootPath?: string; // Optional user-defined root path
   setupCompleted?: boolean; // Whether the initial setup (storage selection) is done
 }
@@ -128,6 +130,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultLanguage: 'en',
   highlightColors: ['#fef08a', '#86efac', '#93c5fd', '#f9a8d4', '#fdba74'],
   autoSaveInterval: 30,
+  postItWidth: 240,
+  postItSide: 'right',
   dataRootPath: '',
   setupCompleted: false,
 };

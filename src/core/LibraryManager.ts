@@ -55,9 +55,22 @@ export class LibraryManager {
         
         allItems.forEach(item => {
             const existing = mergedMap.get(item.id);
-            // If duplicate, pick the one with later lastOpened timestamp
-            if (!existing || (item.lastOpened || 0) > (existing.lastOpened || 0)) {
+            if (!existing) {
                 mergedMap.set(item.id, item);
+            } else {
+                // If one has absolute path and the other has relative, prefer the RELATIVE one (migrated)
+                const existingIsAbsolute = /^[a-zA-Z]:[\\/]/.test(existing.filePath) || existing.filePath.startsWith('/') || existing.filePath.startsWith('\\\\');
+                const itemIsAbsolute = /^[a-zA-Z]:[\\/]/.test(item.filePath) || item.filePath.startsWith('/') || item.filePath.startsWith('\\\\');
+                
+                if (existingIsAbsolute && !itemIsAbsolute) {
+                    // Prefer the relative path version (keep lastOpened from the newer one)
+                    mergedMap.set(item.id, { ...item, lastOpened: Math.max(item.lastOpened || 0, existing.lastOpened || 0) });
+                } else if (!existingIsAbsolute && itemIsAbsolute) {
+                    // Keep existing (relative), just update lastOpened
+                    mergedMap.set(item.id, { ...existing, lastOpened: Math.max(item.lastOpened || 0, existing.lastOpened || 0) });
+                } else if ((item.lastOpened || 0) > (existing.lastOpened || 0)) {
+                    mergedMap.set(item.id, item);
+                }
             }
         });
 
@@ -87,31 +100,60 @@ export class LibraryManager {
             }
         }
 
-        // 5. Pruning (Fix for Stale/Zombie Files)
-        // If the file is NOT found physically, mark it missing or remove?
-        // To be safe against network driver disconnection, we ONLY prune if physicalFiles is not empty
-        // and we are sure the file *should* be there.
-        // For now, let's just trust physicalFiles if it returned > 0 items.
-        
+        // 5. Auto-fix absolute paths: if filename exists in data dir, convert to relative
         if (physicalFiles.length > 0) {
             for (const [id, item] of mergedMap) {
-                // Skip remote/virtual files
+                const fp = item.filePath;
+                const isAbsolutePath = /^[a-zA-Z]:[\\/]/.test(fp) || (fp.startsWith('/') && !this.isBundledDemoPath(fp));
+                if (isAbsolutePath) {
+                    const filename = this.normalizePath(fp).split('/').pop() || '';
+                    if (filename) {
+                        // Exact match
+                        const exactMatch = physicalFiles.find(f => this.normalizePath(f) === filename || f === filename);
+                        if (exactMatch) {
+                            console.log(`[LibrarySync] Auto-fixed absolute path: ${fp} → ${exactMatch}`);
+                            mergedMap.set(id, { ...item, filePath: exactMatch });
+                        } else {
+                            // Fuzzy match: look for file containing the base name
+                            const baseName = filename.replace(/\.(html|htm|md)$/i, '').toLowerCase();
+                            const fuzzyMatch = physicalFiles.find(f => {
+                                const fBase = f.replace(/\.(html|htm|md)$/i, '').toLowerCase();
+                                return fBase.includes(baseName) || baseName.includes(fBase);
+                            });
+                            if (fuzzyMatch) {
+                                console.log(`[LibrarySync] Fuzzy-fixed absolute path: ${fp} → ${fuzzyMatch}`);
+                                mergedMap.set(id, { ...item, filePath: fuzzyMatch });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. Pruning: Remove broken absolute-path entries that couldn't be fixed
+        if (physicalFiles.length > 0) {
+            const toDelete: string[] = [];
+            for (const [id, item] of mergedMap) {
                 if (item.filePath.startsWith('http') || item.filePath.startsWith('virtual/')) continue;
                 if (this.isBundledDemoPath(item.filePath)) continue;
 
-                const normalizedPath = this.normalizePath(item.filePath);
+                const fp = item.filePath;
+                const isAbsolute = /^[a-zA-Z]:[\\/]/.test(fp) || (fp.startsWith('\\\\'));
                 
-                // If it's an absolute path (dragged from outside), we can't easily verify existence via relative listFiles()
-                // unless we use exists(). skip for now.
-                if (item.filePath.includes(':') || item.filePath.startsWith('/')) continue; 
+                if (isAbsolute) {
+                    // Absolute path that survived step 5 means it couldn't be fixed
+                    // → Remove this broken entry
+                    console.log(`[LibrarySync] Removing unfixable absolute-path entry: ${fp}`);
+                    toDelete.push(id);
+                    continue;
+                }
 
+                const normalizedPath = this.normalizePath(fp);
                 if (!normalizedPhysicalFiles.has(normalizedPath)) {
-                    // File deleted outside app?
-                    // mergedMap.delete(id); 
-                    // Let's NOT delete immediately to prevent data loss on glitch.
-                    // Maybe mark as missing?
+                    // Relative path but file not found in data dir - keep for now
                 }
             }
+            toDelete.forEach(id => mergedMap.delete(id));
         }
 
         const finalLibrary = Array.from(mergedMap.values()).sort((a, b) => b.lastOpened - a.lastOpened);

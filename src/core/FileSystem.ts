@@ -25,12 +25,14 @@ export async function readFileSafe(path: string): Promise<string> {
         return cached;
     }
 
-    // 2. Public Folder Fetch (Demo Files)
-    // Supports:
-    // - '/docs/doc1.html'
-    // - 'docs/doc1.html'
-    // - 'doc1.html' (legacy)
-    // - remote http(s)
+    // Skip fetch-based fallback in Tauri (SPA routing returns index.html for any path)
+    const isTauri = typeof window !== 'undefined' &&
+        Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+    if (isTauri) {
+        throw new Error(`File not found (Tauri): ${path}`);
+    }
+
+    // 2. Public Folder Fetch (Demo Files - Browser/Dev only)
     const lower = path.toLowerCase();
     if (lower.endsWith('.html') || lower.endsWith('.htm') || lower.endsWith('.md')) {
         const normalized = path.replace(/\\/g, '/').trim();
@@ -47,7 +49,12 @@ export async function readFileSafe(path: string): Promise<string> {
             try {
                 const res = await fetch(candidate);
                 if (res.ok) {
-                    return await res.text();
+                    const text = await res.text();
+                    // Guard: Detect SPA fallback (index.html returned instead of actual file)
+                    if (text.includes('<div id="root">') && text.includes('Paper Reviewer')) {
+                        continue; // This is the app shell, not the document
+                    }
+                    return text;
                 }
             } catch {
                 // Keep trying next candidate.

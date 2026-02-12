@@ -70,16 +70,27 @@ export class DocumentSession {
              try {
                 text = await readFileSafe(this.id);
              } catch (e) {
-                 // Ignore
+                 console.warn('[DocumentSession] readFileSafe fallback failed:', e);
              }
         }
         
         if (!text) {
-             // Fallback for public demo files (Legacy)
-             // Fallback for public demo files
-             if (this.id.startsWith('/')) {
-                 const res = await fetch(this.id);
-                 if (res.ok) text = await res.text();
+             // Fallback for public demo files (Legacy) - Browser mode only
+             const isTauri = typeof window !== 'undefined' &&
+                 Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+             if (!isTauri && this.id.startsWith('/')) {
+                 try {
+                     const res = await fetch(this.id);
+                     if (res.ok) {
+                         const fetchedText = await res.text();
+                         // Guard: Don't accept the app shell HTML as document content
+                         if (!fetchedText.includes('<div id="root">')) {
+                             text = fetchedText;
+                         }
+                     }
+                 } catch (e) {
+                     // Ignore fetch error
+                 }
              }
         }
         

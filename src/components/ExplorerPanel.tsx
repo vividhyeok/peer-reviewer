@@ -91,23 +91,44 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
                 });
                 
                 if (selected) {
-                    const path = selected as string;
-                    // If we have access to local file system directly (Tauri), we just use the path.
-                    // But we might need to verify if we need to COPY it to app data if we want it isolated?
-                    // Currently current architecture seems to read in-place for Desktop OR use cache.
-                    // Let's assume absolute path works with LocalStorageManager if configured, 
-                    // BUT LocalStorageManager.readFile(path) handles absolute paths?
+                    const absolutePath = selected as string;
                     
-                    // Actually, for better persistence portability, maybe we should copy? 
-                    // For now, let's trust LocalStorageManager's read capability.
+                    // Use Rust backend to copy file + images (bypasses JS FS permission issues)
+                    try {
+                        const { invoke } = await import('@tauri-apps/api/core');
+                        const isHtml = absolutePath.toLowerCase().endsWith('.html') || absolutePath.toLowerCase().endsWith('.htm');
+                        const filename: string = isHtml 
+                            ? await invoke('copy_html_with_images', { sourcePath: absolutePath })
+                            : await invoke('copy_file_to_data', { sourcePath: absolutePath });
+                        console.log('[Import] Rust copy succeeded:', filename, isHtml ? '(with images)' : '');
+                        await LibraryManager.addItem(filename, storageManager);
+                        toast.success(`"${filename}" 문서가 추가되었습니다`);
+                    } catch (rustError) {
+                        console.warn('[Import] Rust copy failed, trying JS fallback:', rustError);
+                        
+                        // JS Fallback: try storageManager
+                        let writeSuccess = false;
+                        if (storageManager && storageManager.isConnected) {
+                            try {
+                                const { readTextFile } = await import('@tauri-apps/plugin-fs');
+                                const content = await readTextFile(absolutePath);
+                                const filename = absolutePath.replace(/\\/g, '/').split('/').pop() || 'imported.html';
+                                await storageManager.writeFile(filename, content);
+                                await LibraryManager.addItem(filename, storageManager);
+                                toast.success(`"${filename}" 문서가 추가되었습니다`);
+                                writeSuccess = true;
+                            } catch (jsError) {
+                                console.error('[Import] JS fallback also failed:', jsError);
+                            }
+                        }
+                        
+                        if (!writeSuccess) {
+                            // Last resort: register with absolute path
+                            await LibraryManager.addItem(absolutePath);
+                            toast.warning("파일이 원본 경로로 연결되었습니다 (이동 시 열리지 않을 수 있음)");
+                        }
+                    }
                     
-                    // Wait, LibraryManager.addItem just adds metadata.
-                    // DocumentSessionManager.load calls storage.readFile(id).
-                    // LocalStorageManager.readFile(id) calls readTextFile(id).
-                    // If 'id' is absolute path (from open dialog), readTextFile works!
-                    
-                    await LibraryManager.addItem(path);
-                    toast.success("File added to Library");
                     onRefresh();
                     return;
                 }
@@ -152,21 +173,20 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             const files = Array.from(e.dataTransfer.files);
             for (const file of files) {
-                if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
+                if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm') || file.name.toLowerCase().endsWith('.md')) {
                     // Try to save to disk first (persistence)
                     const uploaded = await uploadToDevServer(file);
                     
                     if (uploaded) {
                         // If uploaded, use real path
                         const realPath = file.name;
-                        // Avoid 'virtual/' prefix to ensure persistence works
-                        LibraryManager.addItem(realPath); 
+                        await LibraryManager.addItem(realPath, storageManager); 
                         toast.success(`${file.name} saved to disk`);
                     } else {
                         // Fallback to memory (Session only)
                         const virtualPath = `virtual/${file.name}`;
                         await registerBrowserFile(virtualPath, file);
-                        LibraryManager.addItem(virtualPath);
+                        await LibraryManager.addItem(virtualPath);
                         toast.info(`${file.name} opened (Memory Only)`);
                     }
                 }
@@ -184,12 +204,12 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
                 
                 if (uploaded) {
                     const realPath = file.name;
-                    LibraryManager.addItem(realPath);
+                    await LibraryManager.addItem(realPath, storageManager);
                     toast.success(`${file.name} saved to disk`);
                 } else {
                     const virtualPath = `virtual/${file.name}`;
                     await registerBrowserFile(virtualPath, file);
-                    LibraryManager.addItem(virtualPath);
+                    await LibraryManager.addItem(virtualPath);
                     toast.info(`${file.name} opened (Memory Only)`);
                 }
                 

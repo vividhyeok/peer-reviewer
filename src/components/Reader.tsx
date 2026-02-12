@@ -83,7 +83,7 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // --- Hook Integration ---
-  const { loading: isLoading, paragraphs, setParagraphs, sessionRef } = useDocumentLoader({
+  const { loading: isLoading, paragraphs, setParagraphs, error: loadError, sessionRef } = useDocumentLoader({
       activeFile,
       storageManager,
       onStructureLoaded,
@@ -97,10 +97,17 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
       _onAnnotationsChange(newAnnos);
       if (sessionRef.current) {
           sessionRef.current.setAnnotations(newAnnos);
-          // Explicitly save to ensure trust
           sessionRef.current.save().catch(e => console.error("Auto-save failed", e));
       }
   }, [_onAnnotationsChange]);
+
+  // Sync annotations from parent (e.g., sidebar delete) to session
+  useEffect(() => {
+      annotationsRef.current = annotations;
+      if (sessionRef.current) {
+          sessionRef.current.setAnnotations(annotations);
+      }
+  }, [annotations]);
   // ------------------------
 
   const [toolbarVisible, setToolbarVisible] = useState(false);
@@ -248,9 +255,6 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
     // Find the enclosing sentence and retrieve Eng/Kor pair
     const para = paragraphs.find(p => p.id === currentSelection.paragraphId);
     if (para && para.sentences) {
-        // Simple heuristic: which sentence contains the selection?
-        // Since we don't have exact index from selection API easily without DOM traversal,
-        // we try to fuzzy match the selection text against sentences.
         const selectionText = currentSelection.text.trim();
         const matchedSentence = para.sentences.find(s => 
             (s.en && s.en.includes(selectionText)) || 
@@ -258,21 +262,21 @@ export const Reader: React.FC<ReaderProps> = ({ settings, activeFile, onToggleLi
         );
 
         if (matchedSentence) {
-            // "Quick Ask" - Lightweight context checking
             const query = `
-[Context Awareness Query]
-The user is reading this sentence:
-"${matchedSentence.en || matchedSentence.ko}"
+[Quick Ask]
+선택한 텍스트: "${selectionText}"
+해당 문장: "${matchedSentence.en || matchedSentence.ko}"
 
-Question: What does this specific sentence mean in the context of this paper? 
-Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge. Korean.
+위 텍스트에 대해 간결하게 설명해 주세요.
+- 논문 맥락에서의 의미가 있으면 논문 기준으로 설명
+- 일반적인 개념/용어 질문이면 배경지식을 활용하여 자유롭게 설명
+- 한국어로 1~3문장 이내로 답변
 `;
             
-            // Dispatch to AI Panel
             const event = new CustomEvent('research-agent-query', { 
                 detail: { 
                     prompt: query,
-                    autoSend: true // Auto-send for quick interaction, as requested "Quick Ask"
+                    autoSend: true
                 } 
             });
             window.dispatchEvent(event);
@@ -285,8 +289,7 @@ Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge
     // Fallback if no sentence matched
     const event = new CustomEvent('research-agent-query', { 
         detail: { 
-            query: `Briefly explain this concept in one line: "${currentSelection.text}"`,
-            selection: currentSelection.text,
+            prompt: `"${currentSelection.text}"이(가) 무엇인지 간결하게 설명해 주세요. 논문 내용이면 논문 기준, 일반 개념이면 배경지식을 활용하세요. 한국어로 답변.`,
             autoSend: true
         } 
     });
@@ -450,11 +453,40 @@ Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge
             return;
         }
 
-        const pEl = getParagraphElement(selection.anchorNode!);
+        // Use focusNode (end of selection) to determine paragraph, not anchorNode (start)
+        // This prevents cross-paragraph selection from selecting the wrong paragraph
+        const anchorPEl = getParagraphElement(selection.anchorNode!);
+        const focusPEl = getParagraphElement(selection.focusNode!);
+        
+        // If selection spans multiple paragraphs, use the anchor paragraph but clamp text
+        const pEl = anchorPEl;
         if (!pEl) return;
 
         const paragraphId = pEl.id.replace('para-', '');
-        const text = selection.toString().trim();
+        let text = selection.toString().trim();
+        
+        // If cross-paragraph selection, limit to text within the anchor paragraph only
+        if (anchorPEl && focusPEl && anchorPEl !== focusPEl) {
+            // Create a range clamped to the anchor paragraph
+            const clampedRange = document.createRange();
+            clampedRange.setStart(selection.anchorNode!, selection.anchorOffset);
+            // Find the end of the anchor paragraph
+            clampedRange.setEnd(anchorPEl, anchorPEl.childNodes.length);
+            text = clampedRange.toString().trim();
+            // If text is too small, try the focus paragraph instead
+            if (text.length < 2 && focusPEl) {
+                const focusRange = document.createRange();
+                focusRange.setStart(focusPEl, 0);
+                focusRange.setEnd(selection.focusNode!, selection.focusOffset);
+                text = focusRange.toString().trim();
+            }
+        }
+        
+        if (text.length < 1) {
+            setToolbarVisible(false);
+            return;
+        }
+        
         const offset = computeOffsetInParagraph(pEl, selection.anchorNode!, selection.anchorOffset);
 
         setCurrentSelection({
@@ -463,7 +495,8 @@ Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge
           range: { start: offset, end: offset + text.length }
         });
 
-        setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
+        // Position toolbar above the selection using fixed coordinates (no scrollY needed for fixed positioning)
+        setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top });
         setToolbarVisible(true);
     }, 150);
   }, []);
@@ -768,6 +801,47 @@ Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-white/80 backdrop-blur-sm z-50">
+        <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-10 w-10 border-4 border-zinc-200 border-t-violet-600"></div>
+            <p className="text-sm font-medium text-zinc-500 animate-pulse">Loading Document...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError || (activeFile && !isLoading && paragraphs.length === 0)) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-zinc-500 bg-zinc-50/50">
+        <div className="text-center p-12 flex flex-col items-center max-w-lg bg-white rounded-3xl shadow-xl border border-red-100">
+          <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mb-6 border border-red-200">
+            <BookOpen size={32} className="text-red-400" strokeWidth={1.5} />
+          </div>
+          <h3 className="text-xl font-serif text-zinc-900 mb-2">문서를 불러올 수 없습니다</h3>
+          <p className="text-sm text-zinc-500 leading-relaxed mb-2">
+            파일이 삭제되었거나 경로가 변경되었을 수 있습니다.
+          </p>
+          {loadError && (
+            <p className="text-xs text-red-400 bg-red-50 px-3 py-1.5 rounded-lg mb-4 font-mono max-w-md break-all">
+              {loadError}
+            </p>
+          )}
+          <p className="text-xs text-zinc-400 mb-6">
+            파일을 다시 추가(+)해 주세요. 파일은 데이터 폴더에 복사됩니다.
+          </p>
+          <button
+            onClick={() => { onToggleLibrary(); }}
+            className="px-5 py-2.5 bg-zinc-900 text-zinc-50 rounded-xl font-medium text-sm hover:scale-[1.02] active:scale-[0.98] transition-all"
+          >
+            서재로 돌아가기
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-full flex flex-col">
 
@@ -844,6 +918,8 @@ Constraint: Answer in 1-2 sentences. If undefined in text, use general knowledge
                       isBookmarked={currentBookmarkId === para.id}
                       onToggleBookmark={handleToggleBookmark}
                       onAddNote={handleAddNote}
+                      postItWidth={settings.postItWidth ?? 240}
+                      postItSide={settings.postItSide ?? 'right'}
                     />
                   </SafeTag>
                 );

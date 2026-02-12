@@ -2,17 +2,14 @@
 export const CS_RESEARCH_PROMPTS = {
   // 1. Strict Explanation (Context-Aware)
   explain: (text: string) => `
-You are a Context-Aware Research Assistant.
-Task: Explain the selected text *specifically based on how it is used in the provided context*.
-Rules:
-1. If it's a specific term in the text, define it *as the author uses it* (not just a dictionary definition).
-2. If it's a complex sentence, break down its LOGIC (Cause -> Effect).
-3. Output Format:
-   - **Definition in Context**: [One sentence]
-   - **General Definition**: [Optional, only if needed for background]
-4. Direct answer. No intro. Korean.
+선택한 텍스트를 논문 맥락에 맞게 설명해줘.
+규칙:
+1. 용어면 저자가 사용한 맥락에서 정의해줘.
+2. 복잡한 문장이면 논리 구조(원인→결과)를 분해해줘.
+3. 1~2문장으로 간결하게. 마크다운 서식(볼드, 리스트, 헤더 등) 절대 사용하지 마. 순수 평문으로만.
+4. 한국어로 바로 답변.
 
-Context: "${text}"
+텍스트: "${text}"
 `,
 
   // 2. Strict Extraction / Summarization
@@ -48,16 +45,15 @@ Text: "${text}"
 
   // 6. Q&A
   question: (text: string, question: string) => `
-Task: Answer the user's specific question based on the provided text.
-Rules:
-1. Answer ONLY based on the text below.
-2. If the answer is not in the text, say "This section does not contain the answer."
-3. Be direct and concise.
-4. Korean.
+아래 텍스트를 참고하여 질문에 답변해줘.
+규칙:
+1. 텍스트 내용 기반으로 답변. 없으면 "해당 내용이 텍스트에 없습니다."라고 말해줘.
+2. 1~3문장으로 간결하게. 마크다운 서식 사용하지 마. 평문으로만.
+3. 한국어로 답변.
 
-Text: "${text}"
+텍스트: "${text}"
 
-Question: "${question}"
+질문: "${question}"
 `,
 
   // 5. General Agent Prompt (The "Brain")

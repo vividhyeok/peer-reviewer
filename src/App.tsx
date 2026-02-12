@@ -16,6 +16,7 @@ import { type ChatSession } from './components/ConversationsPanel';
 import { LocalStorageManager } from './core/LocalStorageManager';
 import { AnnotationManager } from './core/AnnotationManager';
 import { useUndoableState } from './hooks/useUndoableState';
+import { motion } from 'framer-motion';
 
 
 import { OnboardingScreen } from './components/OnboardingScreen';
@@ -70,6 +71,7 @@ function App() {
   // --- Resizable Sidebars ---
   const [sidebarWidths, setSidebarWidths] = useState(settings.sidebarWidths || { left: 450, right: 450 });
   const [isResizing, setIsResizing] = useState<'left' | 'right' | null>(null);
+  const [isStorageReady, setStorageReady] = useState(false);
 
   useEffect(() => {
     if (settings.sidebarWidths) {
@@ -79,7 +81,25 @@ function App() {
 
   // Sync Data Root Path
   useEffect(() => {
-    storageManagerRef.current.setRootPath(settings.dataRootPath);
+    // Wait for the path to be set before allowing app to load files
+    setStorageReady(false);
+    
+    // Enforce minimum loading time (e.g. 2s) to prevent flashing glitch
+    const minLoadingTime = new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Wrap storage init in a timeout race to prevent infinite hanging
+    const initStorage = Promise.race([
+      storageManagerRef.current.setRootPath(settings.dataRootPath),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Storage init timeout")), 5000))
+    ]).catch(err => {
+      console.error("Storage initialization failed or timed out:", err);
+      // Proceed anyway, worst case we use default/fallback
+      return Promise.resolve();
+    });
+
+    Promise.all([initStorage, minLoadingTime]).finally(() => {
+      setStorageReady(true);
+    });
   }, [settings.dataRootPath]);
 
   // Handlers for Onboarding
@@ -103,12 +123,11 @@ function App() {
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+S: Save confirmation
+      // Ctrl+S: Manual save
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        toast.success("All changes saved automatically", {
-             description: "Your work is synced instantly."
-        });
+        window.dispatchEvent(new Event('manual-save'));
+        toast.success("저장 완료", { description: "모든 변경사항이 저장되었습니다." });
       }
       
       // Ctrl+F: Focus Search (if not already handled)
@@ -252,16 +271,23 @@ function App() {
 
   const handleSaveNote = useCallback((note: Annotation) => {
     setAnnotations(prev => [...prev, note]);
+    setTimeout(() => window.dispatchEvent(new Event('manual-save')), 100);
     toast.success('Saved to Notebook', { icon: <BookOpen size={16} /> });
   }, []);
 
   const handleDeleteAnnotation = useCallback((id: string) => {
     setAnnotations(prev => prev.filter(a => a.id !== id));
+    setTimeout(() => window.dispatchEvent(new Event('manual-save')), 100);
     toast.success('Deleted', { icon: <Search size={16} /> });
   }, []);
 
   useEffect(() => {
     void refreshLibrary();
+    
+    // Listen for programmatic refresh requests (e.g. from useDocumentLoader auto-cleanup)
+    const handleRefreshEvent = () => { void refreshLibrary(); };
+    window.addEventListener('refresh-library', handleRefreshEvent);
+    return () => window.removeEventListener('refresh-library', handleRefreshEvent);
   }, [refreshLibrary]);
 
   useEffect(() => {
@@ -634,6 +660,46 @@ function App() {
     );
   }
 
+  // Prevent main UI loading until Storage Manager path is confirmed
+  // This prevents Reader from failing to load file in custom path
+  if (!isStorageReady) {
+    return (
+       <div className="w-screen h-screen flex flex-col items-center justify-center bg-[#18181b] text-[#dcdcdc] select-none">
+          <motion.div
+             initial={{ scale: 0.9, opacity: 0.8 }}
+             animate={{ scale: 1, opacity: 1 }}
+             transition={{ duration: 1.2, repeat: Infinity, repeatType: "reverse", ease: "easeInOut" }}
+             className="relative mb-8"
+          >
+               <div className="absolute inset-0 bg-violet-600/20 blur-2xl rounded-full"></div>
+               <div className="w-24 h-24 bg-gradient-to-tr from-violet-600/10 to-transparent border border-white/5 rounded-3xl flex items-center justify-center backdrop-blur-sm relative z-10 shadow-2xl">
+                   <BookOpen size={40} className="text-violet-200/90" strokeWidth={1} />
+               </div>
+          </motion.div>
+          
+          <div className="flex flex-col items-center space-y-3">
+              <motion.h2 
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="text-xl font-medium tracking-wide text-zinc-100/90 font-serif"
+              >
+                  Paper Reviewer
+              </motion.h2>
+              <motion.div 
+                 initial={{ opacity: 0 }}
+                 animate={{ opacity: 1 }}
+                 transition={{ delay: 0.4 }}
+                 className="flex items-center gap-2.5 text-xs uppercase tracking-widest text-zinc-500"
+              >
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-[pulse_2s_infinite]"></span>
+                  <span>Loading Workspace...</span>
+              </motion.div>
+          </div>
+       </div>
+    );
+  }
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-white text-zinc-900 font-sans flex flex-col">
       {/* MS Word style Ribbon Top Bar */}
@@ -662,9 +728,9 @@ function App() {
           onRefreshLibrary={refreshLibrary}
           onRemoveFile={async (id) => {
             const item = library.find(i => i.id === id);
-            if (item && window.confirm(`"${item.title}" 문서를 삭제하시겠습니까?`)) {
-              // Clear memory session to prevent stale state on re-add
-              DocumentSessionManager.removeSession(item.filePath);
+            if (item && window.confirm(`"${item.title}" 문서를 삭제하시겠습니까?\n(어노테이션 데이터는 보존됩니다)`)) {
+              // Don't remove session — preserve annotations for potential re-import
+              // DocumentSessionManager.removeSession(item.filePath);
               
               await LibraryManager.removeItem(id, storageManagerRef.current);
               if (activeFileId === id) setActiveFileId(null);
@@ -677,6 +743,7 @@ function App() {
           structure={docStructure}
           annotations={annotations}
           onDeleteAnnotation={handleDeleteAnnotation}
+          storageManager={storageManagerRef.current}
         />
 
         <div className="flex-1 relative z-0">

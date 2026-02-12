@@ -82,8 +82,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'library' as const, icon: LibraryIcon, label: '서재', shortcut: 'Alt+1', side: 'left' },
     { id: 'toc' as const, icon: List, label: '목차', shortcut: 'Alt+2', side: 'left' },
     { id: 'highlights' as const, icon: Highlighter, label: '하이라이트', shortcut: 'Alt+3', side: 'left' },
-    // { id: 'notebook' as const, icon: StickyNote, label: '노트북', shortcut: 'Alt+4', side: 'left' },
+    { id: 'notebook' as const, icon: StickyNote, label: '노트북', shortcut: 'Alt+4', side: 'left' },
     { id: 'agent' as const, icon: Sparkles, label: '연구 에이전트', shortcut: 'Alt+5', side: 'right' },
+    { id: 'conversations' as const, icon: MessageSquareText, label: '저장된 대화', shortcut: 'Alt+6', side: 'right' },
     // { id: 'conversations' as const, icon: MessageSquareText, label: '대화 기록', shortcut: 'Alt+6', side: 'right' },
   ];
 
@@ -268,7 +269,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
 
-                {/* 
                 {activeTab === 'notebook' && side === 'left' && (
                   <div className="h-full flex flex-col">
                     <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
@@ -282,8 +282,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                        />
                     </div>
                   </div>
-                )} 
-                */}
+                )}
 
                 {/* Always mount Agent Panel but hide/show for persistence (Background Execution) */}
                 <div 
@@ -308,19 +307,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 </div>
 
-                {/* 
                 {activeTab === 'conversations' && side === 'right' && (
                   <div className="h-full flex flex-col">
                     <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
-                      <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Conversations</h2>
-                      {onSaveCurrentSession && (
-                          <button 
-                             onClick={onSaveCurrentSession}
-                             className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 font-bold flex items-center gap-1 transition-colors"
-                          >
-                             <Sparkles size={10} /> SAVE
-                          </button>
-                      )}
+                      <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">저장된 대화</h2>
                     </div>
                     <div className="flex-1 overflow-hidden">
                       <ConversationsPanel 
@@ -331,7 +321,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                   </div>
                 )}
-                */}
             </div>
           </div>
         </motion.div>

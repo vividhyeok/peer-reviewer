@@ -53,6 +53,8 @@ export class LocalStorageManager {
     
     // Dynamic Base Path (Relative to Documents OR Absolute)
     private basePath: string = DEFAULT_TAURI_DIR;
+    // Which BaseDirectory to use for relative paths
+    private _baseDir: BaseDirectory = BaseDirectory.Document;
 
     constructor() {
         this.readyPromise = this.checkEnvironment();
@@ -82,26 +84,70 @@ export class LocalStorageManager {
     async setRootPath(path: string | undefined) {
         if (!path) {
             this.basePath = DEFAULT_TAURI_DIR;
+            this._baseDir = BaseDirectory.Document; // reset to default
         } else {
             this.basePath = path;
+            this._baseDir = isAbsolutePath(path) ? BaseDirectory.Document : BaseDirectory.Document;
         }
+        console.log(`[Storage] setRootPath: "${path}" → basePath="${this.basePath}"`);
         
         if (this.config.useTauri) {
             await this.ensureTauriDataDir();
         }
     }
 
+    // Whether Rust backend commands are available
+    private _useRustBackend: boolean = false;
+
     private async ensureTauriDataDir(): Promise<void> {
+        // Strategy 1: Try Rust backend (most reliable, no JS scope issues)
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const dataPath: string = await invoke('get_data_dir_path');
+            console.log(`[Storage] Rust backend data dir: ${dataPath}`);
+            this._useRustBackend = true;
+            this.basePath = dataPath;
+            return;
+        } catch (rustErr) {
+            console.warn('[Storage] Rust backend not available, falling back to JS:', rustErr);
+        }
+
+        // Strategy 2: JS plugin-fs
         try {
             const isAbsolute = isAbsolutePath(this.basePath);
-            const options = isAbsolute ? undefined : { baseDir: BaseDirectory.Document };
+            const options = isAbsolute ? undefined : { baseDir: this._baseDir };
+            
+            console.log(`[Storage] ensureTauriDataDir JS: basePath="${this.basePath}", isAbsolute=${isAbsolute}`);
             
             const dirExists = await exists(this.basePath, options);
             if (!dirExists) {
                 await mkdir(this.basePath, { ...options, recursive: true });
             }
+            const probeFile = `${this.basePath}/.probe`;
+            await writeTextFile(probeFile, 'write_test', options);
+            await remove(probeFile, options);
+            console.log(`[Storage] Data dir verified OK: ${this.basePath}`);
         } catch (error) {
-            console.error('[LocalStorageManager] Tauri storage initialization failed', error);
+            console.error('[Storage] JS storage init failed', error);
+            if (this.basePath !== DEFAULT_TAURI_DIR) {
+                this.basePath = DEFAULT_TAURI_DIR;
+                return this.ensureTauriDataDir();
+            } else {
+                try {
+                    const appDataPath = 'paper-reader-data';
+                    const opts = { baseDir: BaseDirectory.AppLocalData };
+                    const adExists = await exists(appDataPath, opts);
+                    if (!adExists) await mkdir(appDataPath, { ...opts, recursive: true });
+                    const probe = `${appDataPath}/.probe`;
+                    await writeTextFile(probe, 'test', opts);
+                    await remove(probe, opts);
+                    this.basePath = appDataPath;
+                    this._baseDir = BaseDirectory.AppLocalData;
+                    console.log('[Storage] Fallback to AppLocalData succeeded');
+                } catch (e2) {
+                    console.error('[Storage] All JS storage init failed:', e2);
+                }
+            }
         }
     }
 
@@ -149,9 +195,22 @@ export class LocalStorageManager {
         await this.ensureReady();
 
         if (this.config.useTauri) {
-            // Determine Root
+            // Try Rust backend first
+            if (this._useRustBackend) {
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    const allFiles: string[] = await invoke('list_data_files');
+                    return allFiles.filter(f => 
+                        extensions.some(ext => f.toLowerCase().endsWith(ext.toLowerCase()))
+                    );
+                } catch (rustErr) {
+                    console.warn('[Storage] Rust listFiles failed, trying JS:', rustErr);
+                }
+            }
+
+            // JS fallback
             const isAbsolute = isAbsolutePath(this.basePath);
-            const options = isAbsolute ? undefined : { baseDir: BaseDirectory.Document };
+            const options = isAbsolute ? undefined : { baseDir: this._baseDir };
 
             const files: string[] = [];
             const walk = async (relativeDir: string): Promise<void> => {
@@ -233,7 +292,7 @@ export class LocalStorageManager {
              // Use BaseDirectory
              return { 
                  path: `${this.basePath}/${clean}`,
-                 options: { baseDir: BaseDirectory.Document }
+                 options: { baseDir: this._baseDir }
              };
         }
     }
@@ -242,6 +301,16 @@ export class LocalStorageManager {
         await this.ensureReady();
 
         if (this.config.useTauri) {
+            // Try Rust backend first (no scope issues)
+            if (this._useRustBackend && !isAbsolutePath(path)) {
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    return await invoke('read_data_file', { filename: normalizePath(path) });
+                } catch (rustErr) {
+                    console.warn('[Storage] Rust read failed, trying JS:', rustErr);
+                }
+            }
+            // JS fallback
             try {
                 const { path: targetPath, options } = this.getTauriPathOptions(path);
                 return await readTextFile(targetPath, options);
@@ -278,30 +347,25 @@ export class LocalStorageManager {
         await this.ensureReady();
 
         if (this.config.useTauri) {
+            // Try Rust backend first (no scope issues)
+            if (this._useRustBackend && !isAbsolutePath(path)) {
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    await invoke('write_data_file', { filename: normalizePath(path), content });
+                    console.log(`[Storage] writeFile via Rust OK: ${path}`);
+                    return;
+                } catch (rustErr) {
+                    console.warn('[Storage] Rust write failed, trying JS:', rustErr);
+                }
+            }
+            // JS fallback
             try {
-                // Determine target
-                // If path is absolute, we write there directly (risky if user didn't intend, but useful for exports)
-                // If relative, we write to base path.
-                
                 const { path: targetPath, options } = this.getTauriPathOptions(path);
+                console.log(`[Storage] writeFile JS: target="${targetPath}", baseDir=${options?.baseDir ?? 'none(absolute)'}`);
 
-                // Ensure directory exists
-                // We need to parse the dir from targetPath
-                // Since specific path manipulation is hard without 'path' module, we do simple string manipulation
                 const lastSep = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
                 if (lastSep > -1) {
                     const dir = targetPath.substring(0, lastSep);
-                    
-                    // Recursive check logic is tricky because we don't know if 'dir' is relative to BaseDir or absolute here easily
-                    // But 'targetPath' is what we pass to 'writeTextFile'.
-                    // If options.baseDir is set, 'dir' must be relative to it.
-                    // If options is undefined, 'dir' is absolute.
-                    
-                    // Simple approach: Use mkdir with same options!
-                    // If dir is same as basePath (root), mkdir logic in ensureTauriDataDir covers it.
-                    // If subfolder, we need to create it.
-                    
-                    // Check existence
                     const dirExists = await exists(dir, options);
                     if (!dirExists) {
                         await mkdir(dir, { ...options, recursive: true });
@@ -309,9 +373,10 @@ export class LocalStorageManager {
                 }
 
                 await writeTextFile(targetPath, content, options);
+                console.log(`[Storage] writeFile JS OK: ${targetPath}`);
             } catch (error) {
                 console.error('[LocalStorageManager] Tauri write failed', error);
-                throw error; // Propagate
+                throw error;
             }
             return;
         }
@@ -340,6 +405,15 @@ export class LocalStorageManager {
         await this.ensureReady();
 
         if (this.config.useTauri) {
+            if (this._useRustBackend && !isAbsolutePath(path)) {
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    await invoke('delete_data_file', { filename: normalizePath(path) });
+                    return;
+                } catch (rustErr) {
+                    console.warn('[Storage] Rust delete failed, trying JS:', rustErr);
+                }
+            }
             try {
                 const { path: targetPath, options } = this.getTauriPathOptions(path);
                 await remove(targetPath, options);
@@ -453,6 +527,23 @@ export class LocalStorageManager {
         if (this.config.useTauri) {
             const clean = normalizePath(relativePath);
             if (!clean) return null;
+
+            // Try Rust backend first (binary read)
+            if (this._useRustBackend) {
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    const base64: string = await invoke('read_data_file_binary', { filename: clean });
+                    const binaryString = atob(base64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    const blob = new Blob([bytes], { type: inferMimeType(clean) });
+                    return URL.createObjectURL(blob);
+                } catch {
+                    // Fall through to JS plugin-fs
+                }
+            }
 
             try {
                 const { path: targetPath, options } = this.getTauriPathOptions(clean);

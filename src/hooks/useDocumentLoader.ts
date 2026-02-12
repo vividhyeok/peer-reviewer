@@ -84,13 +84,61 @@ export function useDocumentLoader({
         await storageManager?.checkEnvironment();
 
         if (!storageManager) {
-             // If storage not ready, we can't load session. 
-             // We'll return and wait for next render when storageManager is present
              return;
         }
 
+        // --- Migration: Absolute path → Copy to data dir & update library ---
+        let effectiveFilePath = activeFile.filePath;
+        const isAbsolute = /^[a-zA-Z]:[\\/]/.test(effectiveFilePath) || effectiveFilePath.startsWith('/') || effectiveFilePath.startsWith('\\\\');
+        if (isAbsolute && storageManager.isTauri) {
+            const filename = effectiveFilePath.replace(/\\\\/g, '/').split('/').pop() || 'migrated.html';
+            
+            // Strategy 1: Check if file already exists in data directory (from previous import)
+            const existingContent = await storageManager.readFile(filename);
+            if (existingContent) {
+                console.log(`[Migration] File already exists in data dir: ${filename}`);
+                await LibraryManager.updateMetadata(activeFile.id, { filePath: filename }, storageManager);
+                DocumentSessionManager.removeSession(activeFile.filePath);
+                effectiveFilePath = filename;
+            } else {
+                // Strategy 2: Try to copy from original absolute path
+                try {
+                    const { readTextFile } = await import('@tauri-apps/plugin-fs');
+                    const content = await readTextFile(effectiveFilePath);
+                    if (content) {
+                        await storageManager.writeFile(filename, content);
+                        console.log(`[Migration] Copied absolute-path file to data dir: ${filename}`);
+                        await LibraryManager.updateMetadata(activeFile.id, { filePath: filename }, storageManager);
+                        DocumentSessionManager.removeSession(activeFile.filePath);
+                        effectiveFilePath = filename;
+                    }
+                } catch (migrationError) {
+                    console.warn('[Migration] Original file not found, searching data dir...', migrationError);
+                    
+                    // Strategy 3: Fuzzy match - find a file with similar name in data dir
+                    try {
+                        const allFiles = await storageManager.listFiles();
+                        const baseName = filename.replace(/\.(html|htm|md)$/i, '').toLowerCase();
+                        const matched = allFiles.find(f => {
+                            const fBase = f.replace(/\.(html|htm|md)$/i, '').toLowerCase();
+                            // Match by containing the base name or vice versa
+                            return fBase.includes(baseName) || baseName.includes(fBase);
+                        });
+                        if (matched) {
+                            console.log(`[Migration] Fuzzy matched '${filename}' → '${matched}'`);
+                            await LibraryManager.updateMetadata(activeFile.id, { filePath: matched }, storageManager);
+                            DocumentSessionManager.removeSession(activeFile.filePath);
+                            effectiveFilePath = matched;
+                        }
+                    } catch (fuzzyError) {
+                        console.warn('[Migration] Fuzzy match failed:', fuzzyError);
+                    }
+                }
+            }
+        }
+
         // 1. Get Session
-        const session = DocumentSessionManager.getSession(activeFile.filePath, storageManager);
+        const session = DocumentSessionManager.getSession(effectiveFilePath, storageManager);
         sessionRef.current = session;
         
         // Link AnnotationManager for Reader interactions
@@ -176,6 +224,21 @@ export function useDocumentLoader({
         if (!cancelled) {
             setError(message);
             toast.error("문서 로드 실패", { description: message });
+            
+            // If document not found and path is absolute, auto-remove from library
+            if (message.includes('Document not found') && activeFile) {
+                const fp = activeFile.filePath;
+                const isAbsolute = /^[a-zA-Z]:[\\/]/.test(fp) || fp.startsWith('\\\\');
+                if (isAbsolute) {
+                    console.log(`[DocLoader] Auto-removing broken absolute-path entry: ${fp}`);
+                    await LibraryManager.removeItem(activeFile.id, storageManager || undefined).catch(console.error);
+                    toast.info('원본 파일을 찾을 수 없어 라이브러리에서 제거되었습니다.', {
+                        description: '파일을 다시 추가(+)해 주세요.'
+                    });
+                    // Trigger library refresh
+                    window.dispatchEvent(new Event('refresh-library'));
+                }
+            }
         }
       } finally {
         if (!cancelled) {
@@ -202,12 +265,24 @@ export function useDocumentLoader({
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (sessionRef.current && sessionRef.current.isDirty()) {
         e.preventDefault();
-        e.returnValue = ''; // Modern browsers require setting returnValue
+        e.returnValue = '';
+      }
+    };
+
+    // Manual save (Ctrl+S)
+    const handleManualSave = () => {
+      if (sessionRef.current) {
+        sessionRef.current.save().catch(console.error);
+        console.log("[ManualSave] Session saved via Ctrl+S");
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('manual-save', handleManualSave);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('manual-save', handleManualSave);
+    };
   }, []);
 
   // Auto-save interval

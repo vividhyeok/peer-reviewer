@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquareText, BookOpenText, Wand2, RefreshCw, Info, Copy, Check, Trash2, StickyNote, Bookmark, Sparkles, Plus, Table, Sigma } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { ParagraphData, Annotation } from '../types/ReaderTypes';
+import type { AppSettings } from '../types/settings';
 import { toast } from 'sonner';
 import 'katex/dist/katex.min.css';
 import katex from 'katex';
@@ -23,6 +24,8 @@ interface ParagraphProps {
   isBookmarked?: boolean;
   onToggleBookmark?: (id: string) => void;
   onAddNote?: (paragraphId: string, content: string) => void;
+  postItWidth?: number;
+  postItSide?: 'right' | 'left' | 'both';
 }
 
 export const Paragraph: React.FC<ParagraphProps> = ({
@@ -37,7 +40,9 @@ export const Paragraph: React.FC<ParagraphProps> = ({
   onExplainImage,
   isBookmarked = false,
   onToggleBookmark,
-  onAddNote
+  onAddNote,
+  postItWidth = 240,
+  postItSide = 'right',
 }) => {
   const [hoveredSentence, setHoveredSentence] = useState<number | null>(null);
   const [activeEnSentences, setActiveEnSentences] = useState<Set<number>>(new Set());
@@ -230,8 +235,8 @@ export const Paragraph: React.FC<ParagraphProps> = ({
             replacement = `<mark style="background-color: ${color}; border-radius: 2px; color: inherit; padding-left: 1px; padding-right: 1px;">$1</mark>`;
         
         } else if (ann.type === 'insight') {
-            // Light Purple Highlight + Underline
-            replacement = `<span class="border-b-2 border-purple-400 bg-purple-500/10 cursor-help" title="AI Insight: ${safeContent}">$1</span>`;
+            // Small purple dot indicator (not full underline)
+            replacement = `<span class="relative cursor-help insight-mark" title="AI Insight: ${safeContent}"><span class="absolute -top-0.5 -right-1 w-1.5 h-1.5 bg-purple-500 rounded-full"></span>$1</span>`;
         
         } else if (ann.type === 'comment' || ann.type === 'discussion') {
             // Light Blue Highlight + Underline (Manual Discussion)
@@ -342,71 +347,7 @@ export const Paragraph: React.FC<ParagraphProps> = ({
             <div className="absolute -left-1 top-0 bottom-0 w-1 bg-red-500 rounded-l-md" />
         )}
 
-        {/* Paragraph Action Bar */}
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 z-10">
-          
-          {/* Bookmark Button */}
-          {onToggleBookmark && (
-            <button
-                onClick={(e) => { e.stopPropagation(); onToggleBookmark(data.id); }}
-                className={clsx(
-                    "p-1 backdrop-blur-sm border rounded transition-all shadow-lg",
-                    isBookmarked 
-                        ? "bg-red-500/10 border-red-500 text-red-500" 
-                        : "bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-red-400 hover:border-red-500/30"
-                )}
-                title={isBookmarked ? "Remove Bookmark" : "Set Bookmark"}
-            >
-                <Bookmark size={12} fill={isBookmarked ? "currentColor" : "none"} />
-            </button>
-          )}
-
-          <button
-            onClick={(e) => { e.stopPropagation(); handleAIRepair(); }}
-            disabled={isRepairing}
-            // Highlight button if content looks potentially suspicious (simple heuristic)
-            className={clsx(
-              "p-1 backdrop-blur-sm border rounded hover:border-emerald-500/30 transition-all disabled:opacity-50 shadow-lg",
-              (data.enText.includes('path d=') || data.enText.length > 500 && !data.enText.includes(' ')) 
-                 ? "bg-amber-900/50 text-amber-200 border-amber-500/50 animate-pulse" 
-                 : "bg-zinc-800/80 border-zinc-700/50 text-zinc-400 hover:text-emerald-400"
-            )}
-            title={data.enText.includes('path d=') ? "Broken content detected! Click to Auto-Repair with AI" : "AI Repair (Fix duplication/mangling)"}
-          >
-            {isRepairing ? <RefreshCw size={12} className="animate-spin" /> : <Info size={12} />}
-          </button>
-
-           {/* Table Recovery */}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleAIRepair("The user reports a missing or broken TABLE in this paragraph. Please reconstruct it as a Markdown Table or HTML Table from the context."); }}
-            disabled={isRepairing}
-            className="p-1 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 rounded text-zinc-400 hover:text-cyan-400 hover:border-cyan-500/30 transition-all disabled:opacity-50 shadow-lg"
-            title="Recover Missing Table"
-          >
-             <Table size={12} />
-          </button>
-
-          {/* Math Recovery */}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleAIRepair("The user reports missing or broken Math/Formula (LaTeX) in this paragraph. Please reconstruct the mathematical formula using LaTeX ($...$)."); }}
-            disabled={isRepairing}
-            className="p-1 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 rounded text-zinc-400 hover:text-pink-400 hover:border-pink-500/30 transition-all disabled:opacity-50 shadow-lg"
-            title="Recover Missing Formula"
-          >
-             <Sigma size={12} />
-          </button>
-
-          {onAIAlign && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleAIAlign(); }}
-              disabled={isAligning}
-              className="p-1 bg-zinc-800/80 backdrop-blur-sm border border-zinc-700/50 rounded text-zinc-400 hover:text-blue-400 hover:border-blue-500/30 transition-all disabled:opacity-50 shadow-lg"
-              title="AI Deep Align"
-            >
-              {isAligning ? <RefreshCw size={12} className="animate-spin" /> : <Wand2 size={12} />}
-            </button>
-          )}
-        </div>
+        {/* Paragraph Action Bar - moved to right margin */}
 
         <Tag
           className={clsx(
@@ -528,99 +469,333 @@ export const Paragraph: React.FC<ParagraphProps> = ({
           ))}
         </Tag>
 
-
-
-        {/* Right Margin Notes Area */}
+        {/* Margin Tools & Notes — renders on configured side(s) */}
+        {(postItSide === 'right' || postItSide === 'both') && (
         <div 
-            className="absolute left-[102%] top-0 bottom-0 w-64 pointer-events-none flex flex-col gap-3 pt-2 opacity-100 z-20"
+            className="absolute left-[102%] top-0 bottom-0 pointer-events-none flex flex-col gap-3 pt-1 opacity-100 z-20"
+            style={{ width: `${postItWidth + 40}px` }}
         >
-             {/* Toggle/Add Note Button (Always visible on hover) */}
-             <div className="pointer-events-auto opacity-0 group-hover:opacity-100 transition-opacity flex justify-start">
+             {/* Paragraph Tools Row */}
+             <div className="pointer-events-auto opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 items-center flex-wrap">
+                {onToggleBookmark && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onToggleBookmark(data.id); }}
+                    className={clsx(
+                      "p-1.5 rounded-full border transition-all shadow-md",
+                      isBookmarked
+                        ? "bg-red-500/10 border-red-500 text-red-500"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-500/50"
+                    )}
+                    title={isBookmarked ? "북마크 해제" : "북마크"}
+                  >
+                    <Bookmark size={12} fill={isBookmarked ? "currentColor" : "none"} />
+                  </button>
+                )}
+
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleAIRepair(); }}
+                  disabled={isRepairing}
+                  className={clsx(
+                    "p-1.5 rounded-full border transition-all shadow-md",
+                    (data.enText.includes('path d=') || (data.enText.length > 500 && !data.enText.includes(' ')))
+                      ? "bg-amber-900/50 text-amber-200 border-amber-500/50 animate-pulse"
+                      : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/50"
+                  )}
+                  title="AI 수리"
+                >
+                  {isRepairing ? <RefreshCw size={12} className="animate-spin" /> : <Info size={12} />}
+                </button>
+
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleAIRepair("The user reports a missing or broken TABLE in this paragraph. Please reconstruct it as a Markdown Table or HTML Table from the context."); }}
+                  disabled={isRepairing}
+                  className="p-1.5 bg-zinc-800 rounded-full border border-zinc-700 text-zinc-400 hover:text-cyan-400 hover:border-cyan-500/50 transition-all disabled:opacity-50 shadow-md"
+                  title="표 복구"
+                >
+                  <Table size={12} />
+                </button>
+
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleAIRepair("The user reports missing or broken Math/Formula (LaTeX) in this paragraph. Please reconstruct the mathematical formula using LaTeX ($...$)."); }}
+                  disabled={isRepairing}
+                  className="p-1.5 bg-zinc-800 rounded-full border border-zinc-700 text-zinc-400 hover:text-pink-400 hover:border-pink-500/50 transition-all disabled:opacity-50 shadow-md"
+                  title="수식 복구"
+                >
+                  <Sigma size={12} />
+                </button>
+
+                {onAIAlign && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleAIAlign(); }}
+                    disabled={isAligning}
+                    className="p-1.5 bg-zinc-800 rounded-full border border-zinc-700 text-zinc-400 hover:text-blue-400 hover:border-blue-500/50 transition-all disabled:opacity-50 shadow-md"
+                    title="AI 정렬"
+                  >
+                    {isAligning ? <RefreshCw size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  </button>
+                )}
+
+                <div className="w-px h-4 bg-zinc-700 mx-0.5" />
+
                 <button 
                     onClick={() => setShowNoteButton(!showNoteButton)}
                     className="p-1.5 bg-zinc-800 rounded-full text-zinc-400 hover:text-yellow-400 border border-zinc-700 hover:border-yellow-400/50 transition-all shadow-md"
-                    title="Add Post-it Note"
+                    title="포스트잇 메모"
                 >
                     <StickyNote size={14} />
                 </button>
              </div>
 
-             {/* Note Input */}
              <AnimatePresence>
                  {(showNoteButton || isAddingNote) && (
                      <motion.div 
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -10 }}
-                        className="pointer-events-auto bg-yellow-100 p-3 rounded-lg shadow-xl border border-yellow-400/30 w-56 rotate-1"
+                        className="pointer-events-auto bg-yellow-100 p-3 rounded-lg shadow-xl border border-yellow-400/30 rotate-1"
+                        style={{ width: `${postItWidth}px` }}
                      >
                         <textarea
                             value={noteContent}
                             onChange={(e) => setNoteContent(e.target.value)}
                             className="w-full bg-transparent text-sm text-yellow-950 placeholder-yellow-800/50 resize-none outline-none font-medium h-20 leading-snug"
-                            placeholder="Write a note..."
+                            placeholder="메모를 작성하세요..."
                             autoFocus
                         />
                         <div className="flex justify-end gap-2 mt-2">
-                            <button onClick={() => { setShowNoteButton(false); setIsAddingNote(false); }} className="text-xs text-yellow-800 hover:underline">Cancel</button>
-                            <button onClick={handleSaveNote} className="text-xs bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-900 px-2 py-1 rounded font-bold">Save</button>
+                            <button onClick={() => { setShowNoteButton(false); setIsAddingNote(false); }} className="text-xs text-yellow-800 hover:underline">취소</button>
+                            <button onClick={handleSaveNote} className="text-xs bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-900 px-2 py-1 rounded font-bold">저장</button>
                         </div>
                      </motion.div>
                  )}
              </AnimatePresence>
 
-             {/* Existing Notes */}
              {notes.map(note => (
                  <StickyNoteItem 
                     key={note.id} 
                     note={note} 
-                    onDelete={(id) => onDeleteAnnotation && onDeleteAnnotation(id)} 
+                    onDelete={(id) => onDeleteAnnotation && onDeleteAnnotation(id)}
+                    onUpdate={(id, content) => {
+                        const ann = annotations.find(a => a.id === id);
+                        if (ann && onDeleteAnnotation && onAddNote) {
+                            onDeleteAnnotation(id);
+                            onAddNote(data.id, content);
+                        }
+                    }}
+                    width={postItWidth}
                  />
              ))}
         </div>
+        )}
+
+        {/* Left Margin Notes */}
+        {(postItSide === 'left' || postItSide === 'both') && (
+        <div 
+            className="absolute top-0 bottom-0 pointer-events-none flex flex-col gap-3 pt-1 opacity-100 z-20 items-end"
+            style={{ right: '102%', width: `${postItWidth + 40}px` }}
+        >
+             {/* Tool buttons on left side (only when left-only mode) */}
+             {postItSide === 'left' && (
+             <div className="pointer-events-auto opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 items-center flex-wrap justify-end">
+                {onToggleBookmark && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onToggleBookmark(data.id); }}
+                    className={clsx(
+                      "p-1.5 rounded-full border transition-all shadow-md",
+                      isBookmarked
+                        ? "bg-red-500/10 border-red-500 text-red-500"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-500/50"
+                    )}
+                    title={isBookmarked ? "북마크 해제" : "북마크"}
+                  >
+                    <Bookmark size={12} fill={isBookmarked ? "currentColor" : "none"} />
+                  </button>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleAIRepair(); }}
+                  disabled={isRepairing}
+                  className="p-1.5 bg-zinc-800 rounded-full border border-zinc-700 text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/50 transition-all shadow-md"
+                  title="AI 수리"
+                >
+                  {isRepairing ? <RefreshCw size={12} className="animate-spin" /> : <Info size={12} />}
+                </button>
+                {onAIAlign && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleAIAlign(); }}
+                    disabled={isAligning}
+                    className="p-1.5 bg-zinc-800 rounded-full border border-zinc-700 text-zinc-400 hover:text-blue-400 hover:border-blue-500/50 transition-all disabled:opacity-50 shadow-md"
+                    title="AI 정렬"
+                  >
+                    {isAligning ? <RefreshCw size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  </button>
+                )}
+                <div className="w-px h-4 bg-zinc-700 mx-0.5" />
+                <button 
+                    onClick={() => setShowNoteButton(!showNoteButton)}
+                    className="p-1.5 bg-zinc-800 rounded-full text-zinc-400 hover:text-yellow-400 border border-zinc-700 hover:border-yellow-400/50 transition-all shadow-md"
+                    title="포스트잇 메모"
+                >
+                    <StickyNote size={14} />
+                </button>
+             </div>
+             )}
+
+             {/* Left-side post-it input (only when left-only mode) */}
+             {postItSide === 'left' && (
+             <AnimatePresence>
+                 {(showNoteButton || isAddingNote) && (
+                     <motion.div 
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 10 }}
+                        className="pointer-events-auto bg-yellow-100 p-3 rounded-lg shadow-xl border border-yellow-400/30 -rotate-1"
+                        style={{ width: `${postItWidth}px` }}
+                     >
+                        <textarea
+                            value={noteContent}
+                            onChange={(e) => setNoteContent(e.target.value)}
+                            className="w-full bg-transparent text-sm text-yellow-950 placeholder-yellow-800/50 resize-none outline-none font-medium h-20 leading-snug"
+                            placeholder="메모를 작성하세요..."
+                            autoFocus
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                            <button onClick={() => { setShowNoteButton(false); setIsAddingNote(false); }} className="text-xs text-yellow-800 hover:underline">취소</button>
+                            <button onClick={handleSaveNote} className="text-xs bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-900 px-2 py-1 rounded font-bold">저장</button>
+                        </div>
+                     </motion.div>
+                 )}
+             </AnimatePresence>
+             )}
+
+             {/* Left-side notes (always shown in 'left' or 'both' mode) */}
+             {notes.map(note => (
+                 <StickyNoteItem 
+                    key={`left-${note.id}`} 
+                    note={note} 
+                    onDelete={(id) => onDeleteAnnotation && onDeleteAnnotation(id)}
+                    onUpdate={(id, content) => {
+                        const ann = annotations.find(a => a.id === id);
+                        if (ann && onDeleteAnnotation && onAddNote) {
+                            onDeleteAnnotation(id);
+                            onAddNote(data.id, content);
+                        }
+                    }}
+                    width={postItWidth}
+                    side="left"
+                 />
+             ))}
+        </div>
+        )}
+
       </div>
     </div>
   );
 };
 
+// -- Citation-aware link component for post-its & notebook --
+const CitationLink: React.FC<any> = ({ href, children, ...props }) => {
+    if (href?.startsWith('citation:')) {
+        const id = href.replace('citation:', '');
+        return (
+            <button
+                onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const el = document.getElementById(`para-${id}`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.classList.add('ring-4', 'ring-blue-500/50', 'bg-blue-500/10');
+                        setTimeout(() => el.classList.remove('ring-4', 'ring-blue-500/50', 'bg-blue-500/10'), 2000);
+                    }
+                }}
+                className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-bold hover:bg-blue-200 transition-colors align-middle cursor-pointer"
+                title="Go to source"
+            >
+                {children}
+            </button>
+        );
+    }
+    return <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">{children}</a>;
+};
+
 // -- Sticky Note Subcomponent --
-const StickyNoteItem: React.FC<{ note: Annotation, onDelete: (id: string) => void }> = ({ note, onDelete }) => {
+const StickyNoteItem: React.FC<{ note: Annotation, onDelete: (id: string) => void, onUpdate?: (id: string, content: string) => void, width?: number, side?: 'left' | 'right' }> = ({ note, onDelete, onUpdate, width = 240, side = 'right' }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editContent, setEditContent] = useState(note.content);
     
+    const handleSaveEdit = () => {
+        if (editContent.trim() && onUpdate) {
+            onUpdate(note.id, editContent.trim());
+        }
+        setIsEditing(false);
+    };
+
     return (
         <motion.div
-            drag
+            drag={!isEditing}
             dragMomentum={false}
-            initial={{ opacity: 0, scale: 0.9, x: 20 }}
+            initial={{ opacity: 0, scale: 0.9, x: side === 'left' ? -20 : 20 }}
             animate={{ opacity: 1, scale: 1, x: 0 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
             layout
-            className="pointer-events-auto bg-yellow-50 border-l-4 border-yellow-400 p-2 pl-3 shadow-md hover:shadow-lg transition-shadow relative group/note cursor-move"
+            className={clsx(
+                "pointer-events-auto bg-yellow-50 p-2 pl-3 shadow-md hover:shadow-lg transition-shadow relative group/note",
+                !isEditing && "cursor-move",
+                side === 'left' ? "border-r-4 border-yellow-400" : "border-l-4 border-yellow-400"
+            )}
             style={{ 
-                width: '240px', // Default
+                width: `${width}px`,
                 minWidth: '160px',
                 maxWidth: '400px'
             }}
         >
+            {isEditing ? (
+                <div className="pointer-events-auto" onPointerDown={(e) => e.stopPropagation()}>
+                    <textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        className="w-full bg-transparent text-sm text-yellow-950 resize-none outline-none font-medium leading-snug min-h-[60px]"
+                        autoFocus
+                        rows={Math.max(3, editContent.split('\n').length)}
+                    />
+                    <div className="flex justify-end gap-2 mt-1">
+                        <button onClick={() => { setEditContent(note.content); setIsEditing(false); }} className="text-xs text-yellow-800 hover:underline">취소</button>
+                        <button onClick={handleSaveEdit} className="text-xs bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-900 px-2 py-1 rounded font-bold">저장</button>
+                    </div>
+                </div>
+            ) : (
+            <>
             <div 
                 className={clsx(
-                    "text-base text-zinc-800 leading-relaxed font-normal whitespace-pre-wrap cursor-text prose prose-sm max-w-none prose-p:my-1",
+                    "text-[13px] text-zinc-800 leading-snug font-normal whitespace-pre-wrap cursor-text prose prose-sm max-w-none",
+                    "prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-headings:my-1 prose-blockquote:my-1 prose-pre:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
                     !isExpanded && "line-clamp-5 max-h-[15em] overflow-hidden mask-fade-bottom"
                 )}
                 onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
-                onPointerDown={(e) => e.stopPropagation()} // Prevent drag start when clicking text text to select
+                onPointerDown={(e) => e.stopPropagation()}
                 title={isExpanded ? "Click to collapse" : "Click to expand"}
             >
-                <ReactMarkdown>{note.content}</ReactMarkdown>
+                <ReactMarkdown components={{ a: CitationLink }}>{note.content}</ReactMarkdown>
             </div>
             
             {!isExpanded && note.content.length > 100 && (
                 <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-yellow-50 to-transparent pointer-events-none" />
             )}
+            </>
+            )}
 
             <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover/note:opacity-100 transition-opacity">
                  <button 
-                    onPointerDown={(e) => e.stopPropagation()} // Prevent drag
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => { e.stopPropagation(); setIsEditing(true); setEditContent(note.content); }}
+                    className="p-0.5 text-zinc-400 hover:text-blue-500 rounded hover:bg-blue-50"
+                    title="수정"
+                 >
+                    <StickyNote size={14} />
+                 </button>
+                 <button 
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); onDelete(note.id); }}
                     className="p-0.5 text-zinc-400 hover:text-red-500 rounded hover:bg-red-50"
                  >

@@ -217,15 +217,13 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                   {/* 1. Quick Assistants */}
                   <div className="space-y-3">
                       <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-                           <Zap size={14} /> 읽기 보조 도구 (Reading Tools)
+                           <Zap size={14} /> 읽기 보조 도구
                       </h3>
                       <div className="grid grid-cols-1 gap-3">
                         {[
-                            { id: 'explain', label: '단어/개념 설명', desc: '빠른 응답이 중요합니다. (Flashcard, Tooltip)' },
-                            { id: 'summarize', label: '문단 요약', desc: '긴 텍스트를 처리할 수 있는 모델이 좋습니다.' }
-                        ].map(feature => {
-                           const currentModel = AI_MODELS.find(m => m.id === settings.modelAssignments[feature.id as AIFeature]);
-                           return (
+                            { id: 'explain', label: '단어/개념 설명', desc: '하이라이트 후 "설명" 클릭 시 사용. 선택한 텍스트의 의미를 1~2문장으로 설명합니다.', badge: '빠른 응답', badgeColor: 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400', rec: 'deepseek-chat 추천 (저비용, 빠름)' },
+                            { id: 'summarize', label: '문단 요약', desc: '텍스트 요약, 자동 인사이트, 플래시카드 생성에 사용됩니다. 긴 문맥을 처리할 수 있어야 합니다.', badge: '요약', badgeColor: 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400', rec: 'deepseek-chat 추천 (저비용, 충분한 성능)' }
+                        ].map(feature => (
                               <div key={feature.id} className="p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
                                  <div className="flex flex-col gap-2">
                                      <div className="flex justify-between items-start">
@@ -233,11 +231,9 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                                             <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-200">{feature.label}</div>
                                             <div className="text-[11px] text-zinc-500 mt-0.5">{feature.desc}</div>
                                         </div>
-                                        {currentModel && (
-                                            <span className="text-[10px] bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded">
-                                                {currentModel.contextWindow >= 100000 ? '100k+ Context' : 'Fast'}
-                                            </span>
-                                        )}
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap ${feature.badgeColor}`}>
+                                            {feature.badge}
+                                        </span>
                                      </div>
                                      <select
                                         value={settings.modelAssignments[feature.id as AIFeature]}
@@ -253,25 +249,23 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                                             );
                                           })}
                                       </select>
+                                     <div className="text-[10px] text-zinc-400 italic">💡 {feature.rec}</div>
                                  </div>
                               </div>
-                           );
-                        })}
+                        ))}
                       </div>
                   </div>
 
                   {/* 2. Deep Thinking */}
                   <div className="space-y-3">
                       <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
-                           <MessageSquareText size={14} /> 심층 분석 (Deep Analysis)
+                           <MessageSquareText size={14} /> 심층 분석
                       </h3>
                       <div className="grid grid-cols-1 gap-3">
                         {[
-                            { id: 'chat', label: '연구 에이전트 (Chat)', desc: '복잡한 질문 해결 및 추론 능력 필요.' },
-                            { id: 'discussion', label: '소크라테스 토론', desc: '논리적 비판 및 반론 생성.' }
-                        ].map(feature => {
-                           const currentModel = AI_MODELS.find(m => m.id === settings.modelAssignments[feature.id as AIFeature]);
-                           return (
+                            { id: 'chat', label: '연구 에이전트', desc: '우측 패널의 AI 채팅에서 사용됩니다. 논문 내용 기반 질의응답, 복잡한 질문 해결에 사용됩니다.', badge: '추론', badgeColor: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400', rec: 'gemini-2.0-flash 추천 (빠르고 정확)' },
+                            { id: 'discussion', label: '소크라테스 토론', desc: 'AI 토론 모드에서 사용됩니다. 논문에 대해 비판적 질문을 생성하고 논리적 반론을 제시합니다.', badge: '토론', badgeColor: 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400', rec: 'deepseek-reasoner 추천 (깊은 추론)' }
+                        ].map(feature => (
                               <div key={feature.id} className="p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
                                  <div className="flex flex-col gap-2">
                                      <div className="flex justify-between items-start">
@@ -279,11 +273,9 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                                             <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-200">{feature.label}</div>
                                             <div className="text-[11px] text-zinc-500 mt-0.5">{feature.desc}</div>
                                         </div>
-                                         {currentModel && (
-                                            <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
-                                                Reasoning
-                                            </span>
-                                        )}
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap ${feature.badgeColor}`}>
+                                            {feature.badge}
+                                        </span>
                                      </div>
                                      <select
                                         value={settings.modelAssignments[feature.id as AIFeature]}
@@ -299,10 +291,52 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                                             );
                                           })}
                                       </select>
+                                     <div className="text-[10px] text-zinc-400 italic">💡 {feature.rec}</div>
                                  </div>
                               </div>
-                           );
-                        })}
+                        ))}
+                      </div>
+                  </div>
+
+                  {/* 3. Document Recovery */}
+                  <div className="space-y-3">
+                      <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-2">
+                           <Zap size={14} /> 문서 복구 도구
+                      </h3>
+                      <div className="grid grid-cols-1 gap-3">
+                        {[
+                            { id: 'formula', label: '수식 복구', desc: '깨진 LaTeX 수식을 AI로 복원합니다. 문단 옆 "fx" 버튼에서 사용됩니다.', badge: '수식', badgeColor: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400', rec: 'gemini-2.0-flash 추천 (무료, 수식 인식 우수)' },
+                            { id: 'table', label: '표 복구', desc: '깨진 표를 AI로 복원합니다. 문단 옆 표 아이콘 버튼에서 사용됩니다.', badge: '표', badgeColor: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400', rec: 'gemini-2.0-flash 추천 (무료, 구조 파악 우수)' }
+                        ].map(feature => (
+                              <div key={feature.id} className="p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                                 <div className="flex flex-col gap-2">
+                                     <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-200">{feature.label}</div>
+                                            <div className="text-[11px] text-zinc-500 mt-0.5">{feature.desc}</div>
+                                        </div>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap ${feature.badgeColor}`}>
+                                            {feature.badge}
+                                        </span>
+                                     </div>
+                                     <select
+                                        value={settings.modelAssignments[feature.id as AIFeature]}
+                                        onChange={(e) => updateModelAssignment(feature.id as AIFeature, e.target.value)}
+                                        className="w-full px-2 py-2 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                                      >
+                                         {AI_MODELS.map(model => {
+                                            const priceKrw = model.costPer1MTokens ? Math.round(model.costPer1MTokens * 1450) : 0;
+                                            return (
+                                              <option key={model.id} value={model.id}>
+                                                {model.name} — {model.costPer1MTokens === 0 ? '무료' : `₩${priceKrw.toLocaleString()}/1M`}
+                                              </option>
+                                            );
+                                          })}
+                                      </select>
+                                     <div className="text-[10px] text-zinc-400 italic">💡 {feature.rec}</div>
+                                 </div>
+                              </div>
+                        ))}
                       </div>
                   </div>
                 </div>
@@ -480,6 +514,52 @@ export const AdvancedSettings: React.FC<AdvancedSettingsProps> = ({
                       }
                       className="w-full"
                     />
+                  </div>
+
+                  <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4 space-y-2.5">
+                    <label className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      포스트잇 가로폭 (Post-it width {settings.postItWidth ?? 240}px)
+                    </label>
+                    <input
+                      type="range"
+                      min={160}
+                      max={400}
+                      step={10}
+                      value={settings.postItWidth ?? 240}
+                      onChange={(event) =>
+                        updateSettings({
+                          ...settings,
+                          postItWidth: Number(event.target.value),
+                        })
+                      }
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4 space-y-2.5">
+                    <label className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      포스트잇 위치 (Post-it side)
+                    </label>
+                    <div className="flex gap-2">
+                      {([
+                        { value: 'right' as const, label: '오른쪽' },
+                        { value: 'left' as const, label: '왼쪽' },
+                        { value: 'both' as const, label: '양쪽' },
+                      ]).map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => updateSettings({ ...settings, postItSide: opt.value })}
+                          className={clsx(
+                            'px-3 py-1.5 rounded text-xs font-medium transition-colors',
+                            (settings.postItSide ?? 'right') === opt.value
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-600'
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}

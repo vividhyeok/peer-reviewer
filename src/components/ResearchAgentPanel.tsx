@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, Bot, User, Loader2, ChevronDown, ChevronUp, Search, Database, UserCheck, Microscope, Layers, ShieldAlert, Lightbulb, MessageSquareText, BookOpen, Copy, Check, RotateCw } from 'lucide-react';
+import { Sparkles, Send, Bot, User, Loader2, ChevronDown, ChevronUp, Search, Database, UserCheck, Microscope, Layers, ShieldAlert, Lightbulb, MessageSquareText, BookOpen, Copy, Check, RotateCw, Save } from 'lucide-react';
 import { MultiAIClient } from '../core/MultiAIClient';
 import { type AppSettings, AI_MODELS } from '../types/settings';
 import { type AgentThought, type AIMessage, type PaperSummary, type Annotation } from '../types/ReaderTypes';
@@ -276,19 +276,31 @@ export const ResearchAgentPanel: React.FC<ResearchAgentPanelProps> = ({ settings
     };
 
     const getSystemPrompt = () => {
+        const isDOCMode = !useExternalKnowledge;
         let basePrompt = `You are an expert academic research assistant named "ScholarAI".
 Role: Help the user understand the paper.
 Language: ALWAYS respond in Korean (한국어).
 Tone: Professional, academic, yet accessible.
 
 Context Strategy:
-${useExternalKnowledge 
-  ? '1. You MAY use your external knowledge to explain concepts not found in the paper.\n2. Verify external facts if possible.' 
-  : '1. Answer ONLY based on the provided text excerpts. Do not hallucinate external details.\n2. If the answer is not in the text, state "논문 내용에서 찾을 수 없습니다."'}
+${isDOCMode
+  ? `1. Answer STRICTLY based on the provided text only. Do NOT use external knowledge.
+2. When referencing the paper, ALWAYS include inline citation links using this exact format: [참조](citation:PARAGRAPH_ID)
+   - The text contains markers like [[ID:xxx]] before each paragraph.
+   - Use the ID from the marker closest to the information you reference.
+   - Example: "이 연구에서는 transformer 모델을 제안합니다 [참조](citation:p3)"
+3. Include at least one [참조] link per claim you make from the paper.
+4. If the answer is not in the text, state "논문 내용에서 해당 정보를 찾을 수 없습니다."`
+  : `1. You MAY freely use external knowledge to explain concepts.
+2. For paper-specific claims, base them on the provided text.
+3. Clearly distinguish between paper content and your general knowledge.
+4. No need for [참조] citations in WEB mode.`
+}
 
-Citation Style:
-- When referring to specific parts of the paper, try to locate them conceptually (e.g., "In the Methodology section...").
-- If possible, verify your answers with the text provided below.
+Output Rules:
+- Be concise and direct.
+- For [Quick Ask] queries: respond in 1-2 sentences, plain text, NO markdown formatting (no bold, no headers, no lists).
+- For regular questions: use markdown as needed for clarity.
 
 Current Context:
 `;
@@ -433,6 +445,17 @@ Current Context:
                     </div>
 
                     {activeTab === 'chat' && messages.length > 0 && (
+                        <>
+                        <button
+                            onClick={() => {
+                                window.dispatchEvent(new CustomEvent('save-session-data', { detail: { messages } }));
+                                toast.success("대화가 저장되었습니다");
+                            }}
+                            className="p-1.5 text-[var(--fg-tertiary)] hover:text-blue-500 hover:bg-blue-500/10 rounded-md transition-colors"
+                            title="대화 저장"
+                        >
+                            <Save size={14} />
+                        </button>
                         <button
                             onClick={handleNewChat}
                             className="p-1.5 text-[var(--fg-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 rounded-md transition-colors"
@@ -440,6 +463,7 @@ Current Context:
                         >
                             <RotateCw size={14} />
                         </button>
+                        </>
                     )}
                     {loading && <Loader2 size={14} className="animate-spin text-[var(--accent)]" />}
                 </div>

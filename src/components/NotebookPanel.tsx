@@ -1,14 +1,43 @@
 import React from 'react';
 import type { Annotation } from '../types/ReaderTypes';
-import { Trash2, ExternalLink, Bot, MessageSquare, StickyNote, Quote } from 'lucide-react';
+import { Trash2, ExternalLink, Bot, MessageSquare, StickyNote, Quote, BookOpen } from 'lucide-react';
 import { clsx } from 'clsx';
 import ReactMarkdown from 'react-markdown';
+import { toast } from 'sonner';
 
 interface NotebookPanelProps {
     annotations: Annotation[];
     onDelete: (id: string) => void;
     onJump: (paraId: string) => void;
 }
+
+// Citation-aware link component
+const CitationLink: React.FC<any> = ({ href, children, ...props }) => {
+    if (href?.startsWith('citation:')) {
+        const id = href.replace('citation:', '');
+        return (
+            <button
+                onClick={(e) => {
+                    e.preventDefault();
+                    const el = document.getElementById(`para-${id}`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.classList.add('ring-4', 'ring-blue-500/50', 'bg-blue-500/10');
+                        setTimeout(() => el.classList.remove('ring-4', 'ring-blue-500/50', 'bg-blue-500/10'), 2000);
+                    } else {
+                        toast.error(`Source paragraph not found`);
+                    }
+                }}
+                className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-bold hover:bg-blue-200 transition-colors align-middle cursor-pointer"
+                title="Go to source"
+            >
+                <BookOpen size={10} />
+                {children}
+            </button>
+        );
+    }
+    return <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">{children}</a>;
+};
 
 export const NotebookPanel: React.FC<NotebookPanelProps> = ({ annotations, onDelete, onJump }) => {
     // Filter for saved AI responses and Notes
@@ -66,12 +95,8 @@ export const NotebookPanel: React.FC<NotebookPanelProps> = ({ annotations, onDel
                    </div>
                    
                    {/* Content */}
-                   <div className="prose prose-sm max-w-none text-xs text-zinc-700 leading-relaxed">
-                       {item.type === 'ai_response' ? (
-                           <ReactMarkdown>{item.content}</ReactMarkdown>
-                       ) : (
-                           <p className="whitespace-pre-wrap">{item.content}</p>
-                       )}
+                   <div className="prose prose-sm max-w-none text-xs text-zinc-700 leading-snug prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-headings:my-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                       <ReactMarkdown components={{ a: CitationLink }}>{item.content}</ReactMarkdown>
                    </div>
                    
                    {/* Context Quote */}
